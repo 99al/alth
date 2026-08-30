@@ -1,0 +1,16 @@
+{
+  "name": "@workspace/mister-bot",
+  "version": "1.0.0",
+  "description": "بوت Messenger يعتمد على ws3-fca وappstate",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js",
+    "check": "node --check index.js && node --check main.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws3-fca": "^3.5.2"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "قصف": {
+    "enabled": true
+  },
+  "كاتش": {
+    "enabled": true
+  },
+  "رد": {
+    "enabled": false
+  },
+  "يوت": {
+    "enabled": true
+  },
+  "بانكاي": {
+    "enabled": false
+  }
+}

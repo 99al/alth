@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "لوحة تحكم البوت"
+version = "1.0.0"
+id = "artifacts/control-panel"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23401
+
+[services.development]
+run = "pnpm --filter @workspace/control-panel run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/control-panel", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/control-panel/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23401"
+BASE_PATH = "/"

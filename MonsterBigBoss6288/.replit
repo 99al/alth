@@ -26,7 +26,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd MonsterBigBoss6288 && pnpm --filter @workspace/mister-bot run start"
+args = "cd bot && node index.js"
 waitForPort = 3000
 
 [workflows.workflow.metadata]
@@ -41,8 +41,16 @@ path = "scripts/post-merge.sh"
 timeoutMs = 20000
 
 [[ports]]
+localPort = 3000
+externalPort = 80
+
+[[ports]]
 localPort = 8080
 externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 8081
 
 [[ports]]
 localPort = 8082

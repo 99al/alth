@@ -1,0 +1,266 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: bot
+    description: Bot control operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /bot/status:
+    get:
+      operationId: getBotStatus
+      tags: [bot]
+      summary: Get bot status
+      description: Returns current bot connection status and account info
+      responses:
+        "200":
+          description: Bot status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
+  /bot/cookies:
+    post:
+      operationId: updateBotCookies
+      tags: [bot]
+      summary: Update bot cookies
+      description: Update the bot appstate cookies and trigger reconnect
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CookiesInput"
+      responses:
+        "200":
+          description: Cookies updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateResult"
+        "400":
+          description: Invalid cookies
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /bot/commands:
+    get:
+      operationId: getBotCommands
+      tags: [bot]
+      summary: List all commands with enabled/disabled state
+      responses:
+        "200":
+          description: Commands list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BotCommand"
+
+  /bot/admins:
+    get:
+      operationId: getBotAdmins
+      tags: [bot]
+      summary: List all admin IDs
+      responses:
+        "200":
+          description: Admin list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminList"
+    post:
+      operationId: addBotAdmin
+      tags: [bot]
+      summary: Add an admin ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminInput"
+      responses:
+        "200":
+          description: Admin added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminList"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /bot/admins/{id}:
+    delete:
+      operationId: removeBotAdmin
+      tags: [bot]
+      summary: Remove an admin ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Admin removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminList"
+        "404":
+          description: Admin not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /bot/commands/{name}/toggle:
+    post:
+      operationId: toggleBotCommand
+      tags: [bot]
+      summary: Enable or disable a bot command
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Command toggled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotCommand"
+        "404":
+          description: Command not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    BotStatus:
+      type: object
+      properties:
+        loggedIn:
+          type: boolean
+        userID:
+          type: ["string", "null"]
+        userName:
+          type: ["string", "null"]
+        uptime:
+          type: number
+        reconnectAttempts:
+          type: number
+        lastUpdated:
+          type: ["string", "null"]
+        status:
+          type: string
+      required:
+        - loggedIn
+        - userID
+        - userName
+        - uptime
+        - reconnectAttempts
+        - lastUpdated
+        - status
+
+    CookiesInput:
+      type: object
+      properties:
+        cookies:
+          type: array
+          items:
+            type: object
+      required:
+        - cookies
+
+    UpdateResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required:
+        - success
+        - message
+
+    BotCommand:
+      type: object
+      properties:
+        name:
+          type: string
+        enabled:
+          type: boolean
+        description:
+          type: string
+      required:
+        - name
+        - enabled
+        - description
+
+    AdminList:
+      type: object
+      properties:
+        admins:
+          type: array
+          items:
+            type: string
+      required:
+        - admins
+
+    AdminInput:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
