@@ -125,6 +125,21 @@ async function handleMessage(api, event) {
     return;
   }
 
+  if (
+    body === 'جريد' ||
+    body.startsWith('جريد ') ||
+    body === 'جريد البوت' ||
+    body.startsWith('جريد البوت ')
+  ) {
+    if (!isAdmin(senderID)) return;
+    if (!isCommandEnabled('جريد')) return;
+    const cmd = commands.get('جريد');
+    if (cmd) cmd.execute(api, event).catch(e =>
+      console.error('[الث] خطأ في جريد البوت:', e.message)
+    );
+    return;
+  }
+
   if (body.startsWith('رد ') || body === 'رد قائمة') {
     if (!isAdmin(senderID)) return;
     if (!isCommandEnabled('رد')) return;
