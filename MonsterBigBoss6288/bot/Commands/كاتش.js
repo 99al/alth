@@ -17,6 +17,11 @@ module.exports = {
     const threadID = String(event.threadID);
     const body = (event.body || '').trim();
 
+    if (body === 'كاتش') {
+      try { await api.sendMessage('⚠️ مثال: كاتش الث', threadID); } catch (e) {}
+      return;
+    }
+
     if (body.startsWith('كاتش ')) {
       const nickname = body.slice('كاتش '.length).trim();
       if (!nickname) {

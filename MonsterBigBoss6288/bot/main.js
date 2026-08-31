@@ -115,7 +115,7 @@ async function handleMessage(api, event) {
     return;
   }
 
-  if (body.startsWith('كاتش ') || body.startsWith('مجموعة ') || body.startsWith('جروب ')) {
+  if (body === 'كاتش' || body.startsWith('كاتش ') || body.startsWith('مجموعة ') || body.startsWith('جروب ')) {
     if (!isAdmin(senderID)) return;
     if (!isCommandEnabled('كاتش')) return;
     const cmd = commands.get('كاتش');
