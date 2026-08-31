@@ -60,6 +60,10 @@ function isCommandEnabled(name) {
   }
 }
 
+function isHelpRequest(body) {
+  return body === 'اومر' || body === 'أوامر' || body === 'اومر البوت' || body === 'أوامر البوت';
+}
+
 async function handleMessage(api, event) {
   if (!event || !event.body) return;
 
@@ -89,6 +93,15 @@ async function handleMessage(api, event) {
     await replyCmd.checkAutoReply(api, event).catch(e =>
       console.error('[الث] خطأ في checkAutoReply:', e.message)
     );
+  }
+
+  if (isHelpRequest(body)) {
+    if (!isCommandEnabled('اومر')) return;
+    const cmd = commands.get('اومر');
+    if (cmd) cmd.execute(api, event).catch(e =>
+      console.error('[الث] خطأ في عرض الأوامر:', e.message)
+    );
+    return;
   }
 
   // أوامر محمية: يستخدمها الإدمن فقط
@@ -175,4 +188,4 @@ function handleEvent(api, event) {
   }
 }
 
-module.exports = { loadCommands, handleMessage, handleEvent, commands };
+module.exports = { loadCommands, handleMessage, handleEvent, commands, isCommandEnabled };

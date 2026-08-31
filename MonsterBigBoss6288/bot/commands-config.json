@@ -5,6 +5,9 @@
   "كاتش": {
     "enabled": true
   },
+  "اومر": {
+    "enabled": true
+  },
   "رد": {
     "enabled": false
   },
