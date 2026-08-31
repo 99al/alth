@@ -1,9 +1,9 @@
 {
-  "loggedIn": true,
-  "userID": "61593671330821",
+  "loggedIn": false,
+  "userID": "61593476548155",
   "userName": null,
-  "uptime": 10,
-  "reconnectAttempts": 0,
-  "lastUpdated": "2026-08-31T01:54:04.098Z",
-  "status": "متصل"
+  "uptime": 160,
+  "reconnectAttempts": 1,
+  "lastUpdated": "2026-08-31T02:03:08.146Z",
+  "status": "غير متصل"
 }
