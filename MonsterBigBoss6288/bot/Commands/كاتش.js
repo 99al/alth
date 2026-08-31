@@ -20,7 +20,7 @@ module.exports = {
     if (body.startsWith('كاتش ')) {
       const nickname = body.slice('كاتش '.length).trim();
       if (!nickname) {
-        try { await api.sendMessage('⚠️ مثال: كاتش مستر', threadID); } catch (e) {}
+        try { await api.sendMessage('⚠️ مثال: كاتش الث', threadID); } catch (e) {}
         return;
       }
 
@@ -95,7 +95,7 @@ module.exports = {
     if (body.startsWith('مجموعة ')) {
       const groupName = body.slice('مجموعة '.length).trim();
       if (!groupName) {
-        try { await api.sendMessage('⚠️ مثال: مجموعة مستر', threadID); } catch (e) {}
+        try { await api.sendMessage('⚠️ مثال: مجموعة الث', threadID); } catch (e) {}
         return;
       }
 

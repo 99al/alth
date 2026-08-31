@@ -1,5 +1,5 @@
 {
-  "name": "@workspace/mister-bot",
+  "name": "@workspace/alth-bot",
   "version": "1.0.0",
   "description": "بوت Messenger يعتمد على ws3-fca وappstate",
   "private": true,

@@ -7,9 +7,9 @@
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
-    "bot:start": "pnpm --filter @workspace/mister-bot run start",
-    "bot:dev": "pnpm --filter @workspace/mister-bot run dev",
-    "bot:check": "pnpm --filter @workspace/mister-bot run check"
+    "bot:start": "pnpm --filter @workspace/alth-bot run start",
+    "bot:dev": "pnpm --filter @workspace/alth-bot run dev",
+    "bot:check": "pnpm --filter @workspace/alth-bot run check"
   },
   "private": true,
   "devDependencies": {

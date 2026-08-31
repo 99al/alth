@@ -18,15 +18,15 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "بوت مستر"
+args = "بوت الث"
 
 [[workflows.workflow]]
-name = "بوت مستر"
+name = "بوت الث"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd MonsterBigBoss6288 && pnpm --filter @workspace/mister-bot run start"
+args = "cd MonsterBigBoss6288 && pnpm --filter @workspace/alth-bot run start"
 waitForPort = 3000
 
 [workflows.workflow.metadata]
@@ -39,10 +39,6 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
-
-[[ports]]
-localPort = 3000
-externalPort = 80
 
 [[ports]]
 localPort = 8080

@@ -1,4 +1,4 @@
-# بوت مستر
+# بوت الث
 
 بوت Messenger يعتمد على `ws3-fca` وملف `appstate.json`. تم تسجيله كحزمة
 مستقلة داخل workspace حتى يكون تشغيله وإدارته واضحين مع لوحة التحكم وواجهة API.
@@ -8,7 +8,7 @@
 من مجلد المشروع:
 
 ```bash
-pnpm --filter @workspace/mister-bot run start
+pnpm --filter @workspace/alth-bot run start
 ```
 
 أو باستخدام السكربتات المختصرة:

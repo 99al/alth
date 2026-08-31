@@ -34,7 +34,7 @@ export function StatusCard({ status, isLoading }: StatusCardProps) {
             <Terminal size={20} />
           </div>
           <div>
-            <h2 className="font-bold text-lg leading-none mb-1 text-foreground">نظام مستر</h2>
+            <h2 className="font-bold text-lg leading-none mb-1 text-foreground">نظام الث</h2>
             <p className="text-xs text-muted-foreground font-mono">CORE_PROCESS_ID_884</p>
           </div>
         </div>

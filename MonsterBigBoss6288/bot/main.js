@@ -40,12 +40,12 @@ function loadCommands() {
       delete require.cache[require.resolve(path.join(commandsPath, file))];
       const cmd = require(path.join(commandsPath, file));
       commands.set(cmd.name, cmd);
-      console.log(`[مستر] ✅ تم تحميل: ${cmd.name}`);
+      console.log(`[الث] ✅ تم تحميل: ${cmd.name}`);
     } catch (e) {
-      console.error(`[مستر] ❌ خطأ في تحميل ${file}:`, e.message);
+      console.error(`[الث] ❌ خطأ في تحميل ${file}:`, e.message);
     }
   }
-  console.log(`[مستر] تم تحميل ${commands.size} أمر.`);
+  console.log(`[الث] تم تحميل ${commands.size} أمر.`);
 }
 
 // ─── التحقق من تفعيل الأمر في commands-config.json ───
@@ -67,7 +67,7 @@ async function handleMessage(api, event) {
   const threadID = String(event.threadID);
   const senderID = String(event.senderID || '');
 
-  console.log(`[مستر] 📩 رسالة من ${senderID} في ${threadID}: "${body.substring(0, 60)}"`);
+  console.log(`[الث] 📩 رسالة من ${senderID} في ${threadID}: "${body.substring(0, 60)}"`);
 
   // عداد 568 — يتفاعل على الرسالة رقم 568 وكل مضاعفاتها
   if (event.messageID && event.isGroup !== false) {
@@ -76,9 +76,9 @@ async function handleMessage(api, event) {
     msgCounters.set(threadID, next);
     if (next % REACTION_MILESTONE === 0) {
       const emoji = REACTION_EMOJIS[Math.floor(Math.random() * REACTION_EMOJIS.length)];
-      console.log(`[مستر] 🎯 رسالة #${next} في ${threadID} — تفاعل بـ ${emoji}`);
+      console.log(`[الث] 🎯 رسالة #${next} في ${threadID} — تفاعل بـ ${emoji}`);
       try { await api.setMessageReaction(emoji, event.messageID); } catch (e) {
-        console.error('[مستر] خطأ في التفاعل:', e.message || e);
+        console.error('[الث] خطأ في التفاعل:', e.message || e);
       }
     }
   }
@@ -87,7 +87,7 @@ async function handleMessage(api, event) {
   const replyCmd = commands.get('رد');
   if (replyCmd && replyCmd.checkAutoReply) {
     await replyCmd.checkAutoReply(api, event).catch(e =>
-      console.error('[مستر] خطأ في checkAutoReply:', e.message)
+      console.error('[الث] خطأ في checkAutoReply:', e.message)
     );
   }
 
@@ -97,7 +97,7 @@ async function handleMessage(api, event) {
     if (!isCommandEnabled('قصف')) return;
     const cmd = commands.get('قصف');
     if (cmd) cmd.execute(api, event).catch(e =>
-      console.error('[مستر] خطأ في قصف:', e.message)
+      console.error('[الث] خطأ في قصف:', e.message)
     );
     return;
   }
@@ -107,7 +107,7 @@ async function handleMessage(api, event) {
     if (!isCommandEnabled('كاتش')) return;
     const cmd = commands.get('كاتش');
     if (cmd) cmd.execute(api, event).catch(e =>
-      console.error('[مستر] خطأ في كاتش/مجموعة:', e.message)
+      console.error('[الث] خطأ في كاتش/مجموعة:', e.message)
     );
     return;
   }
@@ -117,7 +117,7 @@ async function handleMessage(api, event) {
     if (!isCommandEnabled('رد')) return;
     const cmd = commands.get('رد');
     if (cmd) cmd.execute(api, event).catch(e =>
-      console.error('[مستر] خطأ في رد:', e.message)
+      console.error('[الث] خطأ في رد:', e.message)
     );
     return;
   }
@@ -126,7 +126,7 @@ async function handleMessage(api, event) {
     if (!isCommandEnabled('يوت')) return;
     const cmd = commands.get('يوت');
     if (cmd) cmd.execute(api, event).catch(e =>
-      console.error('[مستر] خطأ في يوت:', e.message)
+      console.error('[الث] خطأ في يوت:', e.message)
     );
     return;
   }
@@ -138,7 +138,7 @@ function handleEvent(api, event) {
   // طباعة الحدث للتشخيص
   const logType = event.logMessageType || event.type || '';
   if (logType !== 'read_receipt') {
-    console.log(`[مستر] 📌 حدث: type=${event.type} | logType=${logType}`);
+    console.log(`[الث] 📌 حدث: type=${event.type} | logType=${logType}`);
   }
 
   const catchCmd = commands.get('كاتش');
@@ -162,13 +162,13 @@ function handleEvent(api, event) {
     const botID = api.getCurrentUserID ? api.getCurrentUserID() : null;
 
     if (botID && addedParticipants.some(p => String(p.userFbId || p.userID || p.id || '') === String(botID))) {
-      console.log(`[مستر] ✅ تمت إضافتي إلى المجموعة ${threadID} — جاري تعيين الكنية...`);
+      console.log(`[الث] ✅ تمت إضافتي إلى المجموعة ${threadID} — جاري تعيين الكنية...`);
       setTimeout(async () => {
         try {
           await api.nickname(BOT_NICKNAME, threadID, String(botID));
-          console.log(`[مستر] ✅ تم تعيين الكنية في المجموعة ${threadID}`);
+          console.log(`[الث] ✅ تم تعيين الكنية في المجموعة ${threadID}`);
         } catch (e) {
-          console.error(`[مستر] خطأ في تعيين الكنية بعد الانضمام:`, e.message || e);
+          console.error(`[الث] خطأ في تعيين الكنية بعد الانضمام:`, e.message || e);
         }
       }, 2000);
     }

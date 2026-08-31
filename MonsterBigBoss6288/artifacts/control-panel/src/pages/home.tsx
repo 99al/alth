@@ -47,7 +47,7 @@ export default function Home() {
         
         {/* Footer */}
         <div className="mt-auto pt-6 pb-2 text-center text-[10px] font-mono text-muted-foreground/50 z-10 relative">
-          SYSTEM.CTRL // V_1.0.0 // MISTER_BOT
+          SYSTEM.CTRL // V_1.0.0 // ALTH_BOT
         </div>
       </div>
     </div>
