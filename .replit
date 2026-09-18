@@ -12,16 +12,7 @@ env = { "CI" = "true" }
 runButton = "Project"
 
 [[workflows.workflow]]
-name = "Project"
-mode = "parallel"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "بوت الث"
-
-[[workflows.workflow]]
-name = "بوت الث"
+name = "بوت الث "
 author = "agent"
 
 [[workflows.workflow.tasks]]
@@ -31,6 +22,111 @@ waitForPort = 3000
 
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow]]
+name = "artifacts/api-server: API Server"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "3B4_FFSkEVBkAeYMFRJ2e"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run dev"
+cwd = "./artifacts/api-server"
+waitForPort = 8080
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "8080"
+
+[[workflows.workflow]]
+name = "artifacts/mockup-sandbox: Component Preview Server"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "XegfDyZt7HqfW2Bb8Ghoy"
+isCanvasWorkflow = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/mockup-sandbox run dev"
+cwd = "./artifacts/mockup-sandbox"
+waitForPort = 8081
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "8081"
+BASE_PATH = "/__mockup"
+
+[[workflows.workflow]]
+name = "MonsterBigBoss6288/artifacts/mockup-sandbox: Component Preview Server"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "XegfDyZt7HqfW2Bb8Ghoy"
+isCanvasWorkflow = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/mockup-sandbox run dev"
+cwd = "./MonsterBigBoss6288/artifacts/mockup-sandbox"
+waitForPort = 8081
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "8081"
+BASE_PATH = "/__mockup"
+
+[[workflows.workflow]]
+name = "MonsterBigBoss6288/artifacts/control-panel: web"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "artifacts/control-panel"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/control-panel run dev"
+cwd = "./MonsterBigBoss6288/artifacts/control-panel"
+waitForPort = 23401
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "23401"
+BASE_PATH = "/"
+
+[[workflows.workflow]]
+name = "MonsterBigBoss6288/artifacts/api-server: API Server"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "3B4_FFSkEVBkAeYMFRJ2e"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run dev"
+cwd = "./MonsterBigBoss6288/artifacts/api-server"
+waitForPort = 8080
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "8080"
 
 [agent]
 stack = "PNPM_WORKSPACE"

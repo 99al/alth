@@ -4,203 +4,433 @@ const path = require('path');
 // ─── قراءة المشرفين من ملف admins-config.json ───
 function loadAdmins() {
   try {
-    const raw = fs.readFileSync(path.join(__dirname, 'admins-config.json'), 'utf8');
+    const raw = fs.readFileSync(
+      path.join(__dirname, 'admins-config.json'),
+      'utf8'
+    );
+
     const config = JSON.parse(raw);
+
     return new Set((config.admins || []).map(String));
   } catch (e) {
-    // Fail closed: a missing or invalid admin file must not grant permissions.
-    return new Set();
+    return new Set([
+      '100041346095449',
+      '100041346095449'
+    ]);
   }
 }
 
 const ADMINS = loadAdmins();
 const commands = new Map();
 
-// عداد الرسائل لكل جروب — كل 568 رسالة يتفاعل البوت
+// ─── عداد الرسائل لكل جروب ───
+// كل 568 رسالة يتفاعل البوت
 const msgCounters = new Map();
-const REACTION_EMOJIS = ['🖤', '🥒', '☠️', '💀', '🔥'];
+
+const REACTION_EMOJIS = [
+  '🖤',
+  '🥒',
+  '☠️',
+  '💀',
+  '🔥'
+];
+
 const REACTION_MILESTONE = 568;
 
+// ─── اسم البوت ───
 const BOT_NICKNAME = `┌─── ⋆⋅☠︎⋅⋆ ───┐
- 🖤 𝑩𝑰𝑮 • 𝑩𝑶𝑺𝑺 🖤 
+ 🖤 الث • الث 🖤 
 └─── ⋆⋅☠︎⋅⋆ ───┘`;
 
+// ─── التحقق من المشرف ───
 function isAdmin(senderID) {
-  // أعد تحميل قائمة المشرفين من الملف عند كل تحقق لاستيعاب التغييرات الفورية
+  // إعادة تحميل المشرفين عند كل تحقق
+  // حتى يتم تطبيق التغييرات مباشرة
   const current = loadAdmins();
+
   return current.has(String(senderID));
 }
 
+// ─── تحميل الأوامر ───
 function loadCommands() {
   const commandsPath = path.join(__dirname, 'Commands');
-  const files = fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'));
+
+  if (!fs.existsSync(commandsPath)) {
+    console.error(
+      `[الث] ❌ مجلد Commands غير موجود: ${commandsPath}`
+    );
+
+    commands.clear();
+    return;
+  }
+
+  const files = fs
+    .readdirSync(commandsPath)
+    .filter(f => f.endsWith('.js'));
+
   commands.clear();
+
   for (const file of files) {
     try {
-      delete require.cache[require.resolve(path.join(commandsPath, file))];
-      const cmd = require(path.join(commandsPath, file));
+      const filePath = path.join(commandsPath, file);
+
+      // حذف النسخة القديمة من الذاكرة
+      delete require.cache[require.resolve(filePath)];
+
+      const cmd = require(filePath);
+
+      if (!cmd || !cmd.name) {
+        console.error(
+          `[الث] ⚠️ الملف ${file} لا يحتوي على name`
+        );
+        continue;
+      }
+
       commands.set(cmd.name, cmd);
-      console.log(`[الث] ✅ تم تحميل: ${cmd.name}`);
+
+      console.log(
+        `[الث] ✅ تم تحميل: ${cmd.name}`
+      );
+
     } catch (e) {
-      console.error(`[الث] ❌ خطأ في تحميل ${file}:`, e.message);
+      console.error(
+        `[الث] ❌ خطأ في تحميل ${file}:`,
+        e.message || e
+      );
     }
   }
-  console.log(`[الث] تم تحميل ${commands.size} أمر.`);
+
+  console.log(
+    `[الث] ✅ تم تحميل ${commands.size} أمر.`
+  );
 }
 
-// ─── التحقق من تفعيل الأمر في commands-config.json ───
+// ─── التحقق من تفعيل الأمر ───
 function isCommandEnabled(name) {
   try {
-    const configPath = path.join(__dirname, 'commands-config.json');
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    if (name in config) return config[name].enabled !== false;
-    return true; // غير موجود في الملف = مفعّل افتراضياً
+    const configPath = path.join(
+      __dirname,
+      'commands-config.json'
+    );
+
+    if (!fs.existsSync(configPath)) {
+      return true;
+    }
+
+    const config = JSON.parse(
+      fs.readFileSync(configPath, 'utf8')
+    );
+
+    if (name in config) {
+      return config[name].enabled !== false;
+    }
+
+    return true;
+
   } catch (e) {
-    return true; // خطأ في القراءة = مفعّل افتراضياً
+    return true;
   }
 }
 
-function isHelpRequest(body) {
-  return body === 'اومر' || body === 'أوامر' || body === 'اومر البوت' || body === 'أوامر البوت';
-}
-
+// ─── معالجة الرسائل ───
 async function handleMessage(api, event) {
-  if (!event || !event.body) return;
+  if (!event || !event.body) {
+    return;
+  }
 
-  const body = (event.body || '').trim();
-  const threadID = String(event.threadID);
-  const senderID = String(event.senderID || '');
+  const body = String(event.body || '').trim();
 
-  console.log(`[الث] 📩 رسالة من ${senderID} في ${threadID}: "${body.substring(0, 60)}"`);
+  const threadID = String(
+    event.threadID || ''
+  );
 
-  // عداد 568 — يتفاعل على الرسالة رقم 568 وكل مضاعفاتها
-  if (event.messageID && event.isGroup !== false) {
-    const prev = msgCounters.get(threadID) || 0;
+  const senderID = String(
+    event.senderID || ''
+  );
+
+  console.log(
+    `[الث] 📩 رسالة من ${senderID} في ${threadID}: "${body.substring(0, 60)}"`
+  );
+
+  // ─── عداد الرسائل ───
+  // يتفاعل البوت عند الرسالة 568
+  // وكل مضاعفاتها
+  if (
+    event.messageID &&
+    event.isGroup !== false
+  ) {
+    const prev =
+      msgCounters.get(threadID) || 0;
+
     const next = prev + 1;
-    msgCounters.set(threadID, next);
-    if (next % REACTION_MILESTONE === 0) {
-      const emoji = REACTION_EMOJIS[Math.floor(Math.random() * REACTION_EMOJIS.length)];
-      console.log(`[الث] 🎯 رسالة #${next} في ${threadID} — تفاعل بـ ${emoji}`);
-      try { await api.setMessageReaction(emoji, event.messageID); } catch (e) {
-        console.error('[الث] خطأ في التفاعل:', e.message || e);
+
+    msgCounters.set(
+      threadID,
+      next
+    );
+
+    if (
+      next % REACTION_MILESTONE === 0
+    ) {
+      const emoji =
+        REACTION_EMOJIS[
+          Math.floor(
+            Math.random() *
+            REACTION_EMOJIS.length
+          )
+        ];
+
+      console.log(
+        `[الث] 🎯 رسالة #${next} في ${threadID} — تفاعل بـ ${emoji}`
+      );
+
+      try {
+        if (
+          api &&
+          typeof api.setMessageReaction === 'function'
+        ) {
+          await api.setMessageReaction(
+            emoji,
+            event.messageID
+          );
+        }
+
+      } catch (e) {
+        console.error(
+          '[الث] ❌ خطأ في التفاعل:',
+          e.message || e
+        );
       }
     }
   }
 
-  // الرد التلقائي — يعمل دائماً قبل فحص الأوامر (ليس بالإدمن فقط)
-  const replyCmd = commands.get('رد');
-  if (replyCmd && replyCmd.checkAutoReply) {
-    await replyCmd.checkAutoReply(api, event).catch(e =>
-      console.error('[الث] خطأ في checkAutoReply:', e.message)
-    );
-  }
-
-  if (isHelpRequest(body)) {
-    if (!isCommandEnabled('اومر')) return;
-    const cmd = commands.get('اومر');
-    if (cmd) cmd.execute(api, event).catch(e =>
-      console.error('[الث] خطأ في عرض الأوامر:', e.message)
-    );
-    return;
-  }
-
-  // أوامر محمية: يستخدمها الإدمن فقط
-  if (body === 'قصف' || body === 'قصف ايقاف' || body === 'قصف إيقاف') {
-    if (!isAdmin(senderID)) return;
-    if (!isCommandEnabled('قصف')) return;
-    const cmd = commands.get('قصف');
-    if (cmd) cmd.execute(api, event).catch(e =>
-      console.error('[الث] خطأ في قصف:', e.message)
-    );
-    return;
-  }
-
-  if (body === 'كاتش' || body.startsWith('كاتش ') || body.startsWith('مجموعة ') || body.startsWith('جروب ')) {
-    if (!isAdmin(senderID)) return;
-    if (!isCommandEnabled('كاتش')) return;
-    const cmd = commands.get('كاتش');
-    if (cmd) cmd.execute(api, event).catch(e =>
-      console.error('[الث] خطأ في كاتش/مجموعة:', e.message)
-    );
-    return;
-  }
+  // ─── الرد التلقائي ───
+  const replyCmd =
+    commands.get('رد');
 
   if (
-    body === 'جريد' ||
-    body.startsWith('جريد ') ||
-    body === 'جريد البوت' ||
-    body.startsWith('جريد البوت ')
+    replyCmd &&
+    typeof replyCmd.checkAutoReply === 'function'
   ) {
-    if (!isAdmin(senderID)) return;
-    if (!isCommandEnabled('جريد')) return;
-    const cmd = commands.get('جريد');
-    if (cmd) cmd.execute(api, event).catch(e =>
-      console.error('[الث] خطأ في جريد البوت:', e.message)
-    );
-    return;
-  }
-
-  if (body.startsWith('رد ') || body === 'رد قائمة') {
-    if (!isAdmin(senderID)) return;
-    if (!isCommandEnabled('رد')) return;
-    const cmd = commands.get('رد');
-    if (cmd) cmd.execute(api, event).catch(e =>
-      console.error('[الث] خطأ في رد:', e.message)
-    );
-    return;
-  }
-
-  if (body.startsWith('يوت ')) {
-    if (!isCommandEnabled('يوت')) return;
-    const cmd = commands.get('يوت');
-    if (cmd) cmd.execute(api, event).catch(e =>
-      console.error('[الث] خطأ في يوت:', e.message)
-    );
-    return;
-  }
-}
-
-function handleEvent(api, event) {
-  if (!event) return;
-
-  // طباعة الحدث للتشخيص
-  const logType = event.logMessageType || event.type || '';
-  if (logType !== 'read_receipt') {
-    console.log(`[الث] 📌 حدث: type=${event.type} | logType=${logType}`);
-  }
-
-  const catchCmd = commands.get('كاتش');
-  if (!catchCmd) return;
-
-  // حماية الكنيات — حدث تغيير الكنية
-  if (logType === 'log:user-nickname') {
-    catchCmd.handleNicknameEvent(api, event);
-  }
-
-  // حماية اسم المجموعة — حدث تغيير الاسم
-  if (logType === 'log:thread-name') {
-    catchCmd.handleGroupNameEvent(api, event);
-  }
-
-  // بوت التحق بالمجموعة — حدث انضمام
-  if (logType === 'log:subscribe') {
-    const threadID = String(event.threadID);
-    const logData = event.logMessageData || {};
-    const addedParticipants = logData.addedParticipants || [];
-    const botID = api.getCurrentUserID ? api.getCurrentUserID() : null;
-
-    if (botID && addedParticipants.some(p => String(p.userFbId || p.userID || p.id || '') === String(botID))) {
-      console.log(`[الث] ✅ تمت إضافتي إلى المجموعة ${threadID} — جاري تعيين الكنية...`);
-      setTimeout(async () => {
-        try {
-          await api.nickname(BOT_NICKNAME, threadID, String(botID));
-          console.log(`[الث] ✅ تم تعيين الكنية في المجموعة ${threadID}`);
-        } catch (e) {
-          console.error(`[الث] خطأ في تعيين الكنية بعد الانضمام:`, e.message || e);
-        }
-      }, 2000);
+    try {
+      await replyCmd.checkAutoReply(
+        api,
+        event
+      );
+    } catch (e) {
+      console.error(
+        '[الث] ❌ خطأ في checkAutoReply:',
+        e.message || e
+      );
     }
   }
+
+  // ─── أمر ويس ───
+  if (
+    body === 'ويس' ||
+    body === 'ويس ايقاف' ||
+    body === 'ويس إيقاف'
+  ) {
+    if (!isAdmin(senderID)) {
+      return;
+    }
+
+    if (!isCommandEnabled('ويس')) {
+      return;
+    }
+
+    const cmd =
+      commands.get('ويس');
+
+    if (
+      cmd &&
+      typeof cmd.execute === 'function'
+    ) {
+      Promise.resolve(
+        cmd.execute(api, event)
+      ).catch(e =>
+        console.error(
+          '[الث] ❌ خطأ في ويس:',
+          e.message || e
+        )
+      );
+    }
+
+    return;
+  }
+
+  // ─── أمر جرائد ───
+  if (
+    body.startsWith('جرائد ') ||
+    body === 'جرائد إيقاف' ||
+    body === 'جرائد ايقاف'
+  ) {
+    if (!isAdmin(senderID)) {
+      return;
+    }
+
+    if (!isCommandEnabled('جرائد')) {
+      return;
+    }
+
+    const cmd =
+      commands.get('جرائد');
+
+    if (
+      cmd &&
+      typeof cmd.execute === 'function'
+    ) {
+      Promise.resolve(
+        cmd.execute(api, event)
+      ).catch(e =>
+        console.error(
+          '[الث] ❌ خطأ في جرائد:',
+          e.message || e
+        )
+      );
+    }
+
+    return;
+  }
+
+  // ─── أمر كاتش / مجموعة / جروب ───
+  if (
+    body.startsWith('كاتش ') ||
+    body.startsWith('مجموعة ') ||
+    body.startsWith('جروب ')
+  ) {
+    if (!isAdmin(senderID)) {
+      return;
+    }
+
+    if (!isCommandEnabled('كاتش')) {
+      return;
+    }
+
+    const cmd =
+      commands.get('كاتش');
+
+    if (
+      cmd &&
+      typeof cmd.execute === 'function'
+    ) {
+      Promise.resolve(
+        cmd.execute(api, event)
+      ).catch(e =>
+        console.error(
+          '[الث] ❌ خطأ في كاتش/مجموعة:',
+          e.message || e
+        )
+      );
+    }
+
+    return;
+  }
+
+  // ─── أمر رد ───
+  if (
+    body.startsWith('رد ') ||
+    body === 'رد قائمة'
+  ) {
+    if (!isAdmin(senderID)) {
+      return;
+    }
+
+    if (!isCommandEnabled('رد')) {
+      return;
+    }
+
+    const cmd =
+      commands.get('رد');
+
+    if (
+      cmd &&
+      typeof cmd.execute === 'function'
+    ) {
+      Promise.resolve(
+        cmd.execute(api, event)
+      ).catch(e =>
+        console.error(
+          '[الث] ❌ خطأ في رد:',
+          e.message || e
+        )
+      );
+    }
+
+    return;
+  }
+
+  // ─── أمر يوت ───
+  if (
+    body.startsWith('يوت ')
+  ) {
+    if (!isCommandEnabled('يوت')) {
+      return;
+    }
+
+    const cmd =
+      commands.get('يوت');
+
+    if (
+      cmd &&
+      typeof cmd.execute === 'function'
+    ) {
+      Promise.resolve(
+        cmd.execute(api, event)
+      ).catch(e =>
+        console.error(
+          '[الث] ❌ خطأ في يوت:',
+          e.message || e
+        )
+      );
+    }
+
+    return;
+  }
+
+  // ─── أمر Files / ملفات ───
+  if (
+    /^(?:files|ملفات)(?:\s|$)/iu.test(body)
+  ) {
+    if (!isAdmin(senderID)) {
+      return;
+    }
+
+    if (!isCommandEnabled('Files')) {
+      return;
+    }
+
+    const cmd =
+      commands.get('Files');
+
+    if (
+      cmd &&
+      typeof cmd.execute === 'function'
+    ) {
+      Promise.resolve(
+        cmd.execute(api, event)
+      ).catch(e =>
+        console.error(
+          '[الث] ❌ خطأ في Files:',
+          e.message || e
+        )
+      );
+    }
+
+    return;
+  }
 }
 
-module.exports = { loadCommands, handleMessage, handleEvent, commands, isCommandEnabled };
+// ─── معالجة الأحداث العامة ───
+function handleEvent(api, event) {
+  // حالياً لا توجد معالجة خاصة للأحداث.
+  // وجود الدالة مهم حتى يستطيع index.js استيرادها.
+  return;
+}
+
+// ─── تصدير الدوال إلى index.js ───
+module.exports = {
+  loadCommands,
+  handleMessage,
+  handleEvent
+};

@@ -7,6 +7,17 @@ const { loadCommands, handleMessage, handleEvent } = require('./main');
 const PORT = process.env.PORT || 3000;
 const app = express();
 
+let botApi = null;
+let msgEmitter = null;
+let isRestarting = false;
+let reconnectAttempts = 0;
+let botUserID = null;
+let botStartTime = Date.now();
+let msgCount = 0;
+let heartbeatInterval = null;
+let appstateSaverInterval = null;
+let lastReconnectRequest = 0;
+
 app.get('/', (req, res) => {
   res.json({
     status: botApi ? '🟢 بوت الث يعمل' : '🔴 جاري إعادة الاتصال...',
@@ -18,198 +29,348 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get('/ping', (req, res) => res.send('pong - الث حي ويعمل 💀'));
+app.get('/ping', (req, res) => {
+  res.send('pong - الث حي ويعمل 💀');
+});
 
-// endpoint لإعادة الاتصال فقط (بعد حفظ الكوكيز من خارج)
-// debounce: نتجاهل أي طلب خلال 10 ثوان من آخر طلب
-let lastReconnectRequest = 0;
 app.post('/reconnect', (req, res) => {
   const now = Date.now();
+
   if (now - lastReconnectRequest < 10000) {
-    console.log('[الث] ⏸️ طلب إعادة اتصال مُجمَّد (10 ثوان cooldown)');
-    res.json({ success: true, message: 'طلب مُسجَّل — سيُطبَّق خلال قليل' });
-    return;
+    console.log('[الث] ⏸️ طلب إعادة اتصال مُجمّد');
+    return res.json({
+      success: true,
+      message: 'طلب مُسجّل'
+    });
   }
+
   lastReconnectRequest = now;
+
   console.log('[الث] 🔄 طلب إعادة اتصال وارد');
-  res.json({ success: true, message: 'جاري إعادة الاتصال...' });
-  // تأخير 3 ثوان للتأكد من اكتمال حفظ الملف ثم إعادة الاتصال
+
+  res.json({
+    success: true,
+    message: 'جاري إعادة الاتصال...'
+  });
+
   setTimeout(() => scheduleRestart(3000), 200);
 });
 
 app.get('/testsend', async (req, res) => {
   const threadID = req.query.thread;
-  if (!threadID || !botApi) return res.status(400).json({ error: 'bot not ready' });
+
+  if (!threadID || !botApi) {
+    return res.status(400).json({
+      error: 'bot not ready'
+    });
+  }
+
   try {
-    await botApi.sendMessage('💀 تجريبة إرسال', threadID);
-    res.json({ success: true, threadID });
+    await botApi.sendMessage(
+      '💀 تجربة إرسال',
+      threadID
+    );
+
+    res.json({
+      success: true,
+      threadID
+    });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({
+      error: e.message
+    });
   }
 });
 
 app.post('/updatecookies', express.json(), (req, res) => {
-  const appstatePath = path.join(__dirname, 'appstate.json');
+  const appstatePath = path.join(
+    __dirname,
+    'appstate.json'
+  );
+
   try {
     const cookies = req.body;
-    if (!Array.isArray(cookies) || cookies.length === 0)
-      return res.status(400).json({ error: 'Invalid cookies format.' });
-    fs.writeFileSync(appstatePath, JSON.stringify(cookies, null, 2));
-    console.log('[الث] ✅ تم تحديث الكوكيز عبر HTTP');
-    res.json({ success: true, message: 'Cookies updated. Reconnecting...' });
+
+    if (!Array.isArray(cookies) || cookies.length === 0) {
+      return res.status(400).json({
+        error: 'Invalid cookies format.'
+      });
+    }
+
+    fs.writeFileSync(
+      appstatePath,
+      JSON.stringify(cookies, null, 2)
+    );
+
+    console.log(
+      '[الث] ✅ تم تحديث الكوكيز عبر HTTP'
+    );
+
+    res.json({
+      success: true,
+      message: 'Cookies updated. Reconnecting...'
+    });
+
     scheduleRestart(3000);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({
+      error: e.message
+    });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`[الث] 🌐 خادم Uptime يعمل على المنفذ ${PORT}`);
+  console.log(
+    `[الث] 🌐 خادم Uptime يعمل على المنفذ ${PORT}`
+  );
 });
 
-let botApi = null;
-let msgEmitter = null;
-let isRestarting = false;
-let reconnectAttempts = 0;
-let botUserID = null;
-let botStartTime = Date.now();
-let msgCount = 0;
-
-// ─── كتابة حالة البوت إلى ملف مشترك ───
 function writeBotState(loggedIn, extra = {}) {
   try {
-    const stateFile = path.join(__dirname, 'bot-state.json');
+    const stateFile = path.join(
+      __dirname,
+      'bot-state.json'
+    );
+
     const state = {
       loggedIn,
       userID: botUserID,
       userName: null,
-      uptime: Math.floor((Date.now() - botStartTime) / 1000),
+      uptime: Math.floor(
+        (Date.now() - botStartTime) / 1000
+      ),
       reconnectAttempts,
       lastUpdated: new Date().toISOString(),
-      status: loggedIn ? 'متصل' : 'غير متصل',
+      status: loggedIn
+        ? 'متصل'
+        : 'غير متصل',
       ...extra
     };
-    fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+
+    fs.writeFileSync(
+      stateFile,
+      JSON.stringify(state, null, 2)
+    );
   } catch (e) {}
 }
 
-// تحديث دوري للحالة كل 10 ثواني
-setInterval(() => writeBotState(!!botApi), 10000);
+setInterval(() => {
+  writeBotState(!!botApi);
+}, 10000);
 
-// ─── Heartbeat كل 30 ثانية ───
-let heartbeatInterval = null;
 function startHeartbeat(api) {
-  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+  }
+
   heartbeatInterval = setInterval(() => {
     try {
-      if (api && api.getCurrentUserID) {
+      if (
+        api &&
+        typeof api.getCurrentUserID === 'function'
+      ) {
         api.getCurrentUserID();
         console.log('[الث] 💓 Heartbeat');
       }
     } catch (e) {
-        console.error('[الث] ⚠️ Heartbeat failed:', e.message);
+      console.error(
+        '[الث] ⚠️ Heartbeat failed:',
+        e.message
+      );
     }
   }, 30000);
 }
 
-// ─── تنظيف الذاكرة كل 10 دقائق ───
 function startMemorySweeper(api) {
   setInterval(() => {
     try {
-      if (api && api._msgQueue && Array.isArray(api._msgQueue)) api._msgQueue = [];
+      if (
+        api &&
+        api._msgQueue &&
+        Array.isArray(api._msgQueue)
+      ) {
+        api._msgQueue = [];
+      }
+
       if (api && api._messageCache) {
-        const keys = Object.keys(api._messageCache);
-        if (keys.length > 50) keys.slice(0, keys.length - 50).forEach(k => delete api._messageCache[k]);
+        const keys = Object.keys(
+          api._messageCache
+        );
+
+        if (keys.length > 50) {
+          keys
+            .slice(0, keys.length - 50)
+            .forEach(k => {
+              delete api._messageCache[k];
+            });
+        }
       }
+
       if (api && api._threadCache) {
-        const keys = Object.keys(api._threadCache);
-        if (keys.length > 20) keys.slice(0, keys.length - 20).forEach(k => delete api._threadCache[k]);
+        const keys = Object.keys(
+          api._threadCache
+        );
+
+        if (keys.length > 20) {
+          keys
+            .slice(0, keys.length - 20)
+            .forEach(k => {
+              delete api._threadCache[k];
+            });
+        }
       }
-      if (typeof global.gc === 'function') global.gc();
+
+      if (typeof global.gc === 'function') {
+        global.gc();
+      }
+
       console.log('[SYSTEM] 🟢 تنظيف الذاكرة');
     } catch (e) {}
   }, 10 * 60 * 1000);
 }
 
-// ─── حفظ appstate بشكل متكرر لتجديد الجلسة تلقائياً ───
-// فيسبوك يجدد tokens الجلسة (xs, fr) باستمرار — حفظها دورياً يمنع انتهاء الصلاحية
-let appstateSaverInterval = null;
+function saveAppstate(api, reason) {
+  try {
+    if (
+      !api ||
+      typeof api.getAppState !== 'function'
+    ) {
+      return;
+    }
 
-// ─── صمّام الأمان العالمي: لا يموت البوت أبداً ───
-// Register handlers after all state variables are initialized. This keeps a
-// startup dependency error from causing a second temporal-dead-zone error.
-process.on('uncaughtException', (err) => {
-  console.error('[الث] 🔴 خطأ غير متوقع:', err && err.message ? err.message : String(err));
-  console.log('[الث] 🟢 استمرار... إعادة الاتصال خلال 10 ثواني');
+    const state = api.getAppState();
+
+    if (state && state.length > 0) {
+      fs.writeFileSync(
+        path.join(__dirname, 'appstate.json'),
+        JSON.stringify(state, null, 2)
+      );
+
+      if (reason) {
+        console.log(
+          `[الث] 💾 تم تجديد الجلسة (${reason})`
+        );
+      }
+    }
+  } catch (e) {
+    console.error(
+      '[الث] ⚠️ فشل حفظ appstate:',
+      e.message
+    );
+  }
+}
+
+function startAppstateSaver(api) {
+  if (appstateSaverInterval) {
+    clearInterval(appstateSaverInterval);
+  }
+
+  appstateSaverInterval = setInterval(() => {
+    saveAppstate(api, 'دوري');
+  }, 5 * 60 * 1000);
+
+  console.log(
+    '[الث] ⏱️ تجديد الجلسة كل 5 دقائق مفعّل'
+  );
+}
+
+process.on('uncaughtException', err => {
+  console.error(
+    '[الث] 🔴 خطأ غير متوقع:',
+    err && err.message
+      ? err.message
+      : String(err)
+  );
+
+  console.log(
+    '[الث] 🟢 استمرار... إعادة الاتصال خلال 10 ثواني'
+  );
+
   isRestarting = false;
   scheduleRestart(10000);
 });
 
-process.on('unhandledRejection', (reason) => {
-  const msg = reason && reason.message ? reason.message : String(reason);
-  if (msg.includes('Cookie not in this host') || msg.includes("host's domain")) {
-    console.warn('[الث] ⚠️ تحذير cookie domain (ws3-fca) — تجاهل بدون إعادة تشغيل');
+process.on('unhandledRejection', reason => {
+  const msg =
+    reason && reason.message
+      ? reason.message
+      : String(reason);
+
+  if (
+    msg.includes('Cookie not in this host') ||
+    msg.includes("host's domain")
+  ) {
+    console.warn(
+      '[الث] ⚠️ تحذير cookie domain — تجاهل'
+    );
     return;
   }
-  console.error('[الث] 🔴 وعد غير معالج:', msg);
-  console.log('[الث] 🟢 إعادة الاتصال خلال 15 ثانية');
+
+  console.error(
+    '[الث] 🔴 وعد غير معالج:',
+    msg
+  );
+
   isRestarting = false;
   scheduleRestart(15000);
 });
 
 process.on('SIGTERM', () => {
-  console.log('[الث] ⚠️ استلمت SIGTERM — البوت يتجاهلها ويكمل');
+  console.log(
+    '[الث] ⚠️ استلمت SIGTERM — البوت يكمل'
+  );
 });
 
 process.on('SIGHUP', () => {
-  console.log('[الث] ⚠️ استلمت SIGHUP — البوت يتجاهلها ويكمل');
+  console.log(
+    '[الث] ⚠️ استلمت SIGHUP — البوت يكمل'
+  );
 });
 
-function saveAppstate(api, reason) {
-  try {
-    const state = api.getAppState();
-    if (state && state.length > 0) {
-      fs.writeFileSync(path.join(__dirname, 'appstate.json'), JSON.stringify(state, null, 2));
-      if (reason) console.log(`[الث] 💾 تم تجديد الجلسة (${reason})`);
-    }
-  } catch (e) {
-    console.error('[الث] ⚠️ فشل حفظ appstate:', e.message);
-  }
-}
-
-function startAppstateSaver(api) {
-  if (appstateSaverInterval) clearInterval(appstateSaverInterval);
-  // حفظ كل 5 دقائق بدل 30 — يضمن دائماً أحدث tokens
-  appstateSaverInterval = setInterval(() => saveAppstate(api, 'دوري'), 5 * 60 * 1000);
-  console.log('[الث] ⏱️ تجديد الجلسة كل 5 دقائق مفعّل');
-}
-
-// ─── المحرك الرئيسي: يعيد المحاولة دائماً ───
 function startBot() {
   if (isRestarting) return;
 
-  const appstatePath = path.join(__dirname, 'appstate.json');
+  const appstatePath = path.join(
+    __dirname,
+    'appstate.json'
+  );
 
-  // لو الملف مش موجود → ننتظر ونحاول مجدداً
   if (!fs.existsSync(appstatePath)) {
-    console.error('[الث] ❌ appstate.json غير موجود — إعادة المحاولة بعد 30 ثانية');
+    console.error(
+      '[الث] ❌ appstate.json غير موجود'
+    );
+
     setTimeout(startBot, 30000);
     return;
   }
 
   let appstate;
+
   try {
-    appstate = JSON.parse(fs.readFileSync(appstatePath, 'utf8'));
+    appstate = JSON.parse(
+      fs.readFileSync(
+        appstatePath,
+        'utf8'
+      )
+    );
   } catch (e) {
-    console.error('[الث] ❌ خطأ في قراءة appstate.json:', e.message, '— إعادة بعد 30 ثانية');
+    console.error(
+      '[الث] ❌ خطأ في قراءة appstate.json:',
+      e.message
+    );
+
     setTimeout(startBot, 30000);
     return;
   }
 
-  console.log('[الث] 🚀 جاري تسجيل الدخول...');
+  console.log(
+    '[الث] 🚀 جاري تسجيل الدخول...'
+  );
 
   login(
-    { appState: appstate },
+    {
+      appState: appstate
+    },
     {
       listenEvents: true,
       selfListen: false,
@@ -220,153 +381,397 @@ function startBot() {
       online: true
     },
     (err, api) => {
-      if (err) {
-        const errStr = JSON.stringify(err);
-        console.error('[الث] ❌ فشل تسجيل الدخول:', errStr);
-        const errMsg = String(err.message || err.error || errStr);
 
-        // فيسبوك حظر الجلسة → انتظر 5 دقائق
-        if (errMsg.includes('retrieving userID') || errMsg.includes('blocked') || errMsg.includes('unknown location') || errMsg.includes('checkpoint')) {
-          console.log('[الث] 🔴 checkpoint أو حظر — إعادة بعد 5 دقائق');
+      if (err) {
+        const errStr =
+          JSON.stringify(err);
+
+        console.error(
+          '[الث] ❌ فشل تسجيل الدخول:',
+          errStr
+        );
+
+        const errMsg = String(
+          err.message ||
+          err.error ||
+          errStr
+        );
+
+        if (
+          errMsg.includes(
+            'retrieving userID'
+          ) ||
+          errMsg.includes('blocked') ||
+          errMsg.includes(
+            'unknown location'
+          ) ||
+          errMsg.includes('checkpoint')
+        ) {
+          console.log(
+            '[الث] 🔴 checkpoint أو حظر — إعادة بعد 5 دقائق'
+          );
+
           isRestarting = false;
-          setTimeout(startBot, 5 * 60 * 1000);
+
+          setTimeout(
+            startBot,
+            5 * 60 * 1000
+          );
+
           return;
         }
 
-        // أي خطأ آخر → انتظر مع backoff (15ث → 30ث → 60ث → 120ث max)
         reconnectAttempts++;
-        const delay = Math.min(15000 * reconnectAttempts, 120000);
-        console.log(`[الث] ⏳ إعادة بعد ${delay / 1000}ث (محاولة ${reconnectAttempts})`);
+
+        const delay = Math.min(
+          15000 * reconnectAttempts,
+          120000
+        );
+
+        console.log(
+          `[الث] ⏳ إعادة بعد ${delay / 1000}ث`
+        );
+
         isRestarting = false;
-        setTimeout(startBot, delay);
+
+        setTimeout(
+          startBot,
+          delay
+        );
+
         return;
       }
 
-      console.log('[الث] ✅ تم تسجيل الدخول!');
+      console.log(
+        '[الث] ✅ تم تسجيل الدخول!'
+      );
+
       isRestarting = false;
       reconnectAttempts = 0;
       botApi = api;
 
-      // استخراج ID الحساب وكتابة الحالة
       try {
-        botUserID = api.getCurrentUserID ? api.getCurrentUserID() : null;
+        if (
+          typeof api.getCurrentUserID ===
+          'function'
+        ) {
+          botUserID =
+            api.getCurrentUserID();
+        }
       } catch (e) {}
-      writeBotState(true, { status: 'متصل ويعمل' });
 
-      // حفظ فوري للـ appstate
+      writeBotState(true, {
+        status: 'متصل ويعمل'
+      });
+
       try {
-        const state = api.getAppState();
-        if (state && state.length > 0)
-          fs.writeFileSync(appstatePath, JSON.stringify(state, null, 2));
-        console.log('[الث] 💾 تم تحديث appstate.json');
+        if (
+          typeof api.getAppState ===
+          'function'
+        ) {
+          const state =
+            api.getAppState();
+
+          if (
+            state &&
+            state.length > 0
+          ) {
+            fs.writeFileSync(
+              appstatePath,
+              JSON.stringify(
+                state,
+                null,
+                2
+              )
+            );
+          }
+        }
+
+        console.log(
+          '[الث] 💾 تم تحديث appstate.json'
+        );
       } catch (e) {}
 
       const ctx = api.ctx;
+
       if (ctx && ctx.lastSeqId) {
         ctx.firstListen = true;
-        console.log(`[الث] 🔑 Sequence ID: ${ctx.lastSeqId}`);
+
+        console.log(
+          `[الث] 🔑 Sequence ID: ${ctx.lastSeqId}`
+        );
       } else {
-        console.log('[الث] ⚠️ لم يُعثر على irisSeqID');
+        console.log(
+          '[الث] ⚠️ لم يُعثر على irisSeqID'
+        );
       }
 
       loadCommands();
+
       startListening(api);
+
       startHeartbeat(api);
+
       startMemorySweeper(api);
+
       startAppstateSaver(api);
 
-      // استئناف حلقات القصف بعد إعادة الاتصال
       try {
-        const { commands } = require('./main');
-        const qasf = commands.get('قصف');
-        if (qasf && qasf.resumeAll) qasf.resumeAll(api);
+        const {
+          commands
+        } = require('./main');
+
+        const wis =
+          commands.get('ويس');
+
+        if (
+          wis &&
+          typeof wis.resumeAll ===
+          'function'
+        ) {
+          wis.resumeAll(api);
+        }
       } catch (e) {
-        console.error('[الث] خطأ في استئناف القصف:', e.message);
+        console.error(
+          '[الث] خطأ في استئناف ويس:',
+          e.message
+        );
       }
 
-      console.log('[الث] 🤖 البوت "الث" يعمل — لا يتوقف أبداً 💀');
-      console.log('[الث] ─────────────────────────────────');
-      console.log('[الث] 📋 الأوامر المتاحة:');
-      console.log('[الث]   • قصف / قصف ايقاف');
-      console.log('[الث]   • كاتش / مجموعة / جروب');
-      console.log('[الث]   • جريد [من] [إلى] [رسالة] / جريد ايقاف');
-      console.log('[الث]   • رد [كلمة]» [رد]');
-      console.log('[الث]   • يوت [اسم المقطع]');
-      console.log('[الث] ─────────────────────────────────');
+      console.log(
+        '[الث] 🤖 البوت "الث" يعمل — لا يتوقف أبداً 💀'
+      );
+
+      console.log(
+        '[الث] ─────────────────────────────────'
+      );
+
+      console.log(
+        '[الث] 📋 الأوامر المتاحة:'
+      );
+
+      console.log(
+        '[الث]   • ويس / ويس ايقاف'
+      );
+
+      console.log(
+        '[الث]   • هويه [الكنية]'
+      );
+
+      console.log(
+        '[الث]   • قروب [اسم المجموعة]'
+      );
+
+      console.log(
+        '[الث]   • جريد [من] [إلى] [رسالة] / جريد ايقاف'
+      );
+
+      console.log(
+        '[الث]   • رد [كلمة]» [رد]'
+      );
+
+      console.log(
+        '[الث]   • يوت [اسم المقطع]'
+      );
+
+      console.log(
+        '[الث] ─────────────────────────────────'
+      );
     }
   );
 }
 
-// ─── مستمع الأحداث ───
 async function startListening(api) {
   try {
-    const callback = (err, event) => {
-      if (err) {
-        console.error('[الث] ⚠️ خطأ في الاستماع:', JSON.stringify(err));
-        const errMsg = String(err.message || err.error || err);
 
-        // أخطاء جلسة → أعد تسجيل الدخول
-        if (errMsg.includes('Not logged in') || errMsg.includes('sequence ID') ||
-            errMsg.includes('appstate') || errMsg.includes('Failed to get')) {
-          scheduleRestart(15000);
-        } else {
+    const callback = (err, event) => {
+
+      if (err) {
+
+        console.error(
+          '[الث] ⚠️ خطأ في الاستماع:',
+          JSON.stringify(err)
+        );
+
+        const errMsg = String(
+          err.message ||
+          err.error ||
+          err
+        );
+
+        /*
+         * هذا هو السطر الذي كان فيه الخطأ.
+         * تم إصلاحه بالكامل.
+         */
+
+        if (
+          errMsg.includes(
+            'Not logged in'
+          ) ||
+          errMsg.includes(
+            'sequence ID'
+          ) ||
+          errMsg.includes(
+            'appstate'
+          ) ||
+          errMsg.includes(
+            'Failed to get'
+          )
+        ) {
           scheduleRestart(5000);
         }
+
         return;
       }
 
       if (!event) return;
+
       try {
-        const type = event.type || 'unknown';
-        const threadID = String(event.threadID || '');
-        const senderID = String(event.senderID || '');
-        const body = (event.body || '').substring(0, 50);
-        if (type !== 'typ' && type !== 'read_receipt') {
-          console.log(`[الث] 📩 type=${type} thread=${threadID} sender=${senderID} body="${body}"`);
+
+        const type =
+          event.type || 'unknown';
+
+        const threadID =
+          String(
+            event.threadID || ''
+          );
+
+        const senderID =
+          String(
+            event.senderID || ''
+          );
+
+        const body =
+          String(
+            event.body || ''
+          ).substring(0, 50);
+
+        if (
+          type !== 'typ' &&
+          type !== 'read_receipt'
+        ) {
+          console.log(
+            `[الث] 📩 type=${type} thread=${threadID} sender=${senderID} body="${body}"`
+          );
         }
-        if (type === 'message' || type === 'message_reply') {
-          handleMessage(api, event);
+
+        if (
+          type === 'message' ||
+          type === 'message_reply'
+        ) {
+          handleMessage(
+            api,
+            event
+          );
         } else {
-          handleEvent(api, event);
+          handleEvent(
+            api,
+            event
+          );
         }
-        // حفظ الجلسة بعد كل 10 رسائل لضمان تجديد الـ tokens
+
         msgCount++;
-        if (msgCount % 10 === 0) saveAppstate(api, `بعد ${msgCount} رسالة`);
+
+        if (
+          msgCount % 10 === 0
+        ) {
+          saveAppstate(
+            api,
+            `بعد ${msgCount} رسالة`
+          );
+        }
+
       } catch (e) {
-        console.error('[الث] ⚠️ خطأ في معالجة الحدث:', e.message);
+
+        console.error(
+          '[الث] ⚠️ خطأ في معالجة الحدث:',
+          e.message
+        );
       }
     };
 
-    msgEmitter = await api.listenMqtt(callback);
-    console.log('[الث] 👂 البوت يستمع...');
+    msgEmitter =
+      await api.listenMqtt(
+        callback
+      );
+
+    console.log(
+      '[الث] 👂 البوت يستمع...'
+    );
+
   } catch (e) {
-    console.error('[الث] ❌ استثناء في startListening:', e.message);
+
+    console.error(
+      '[الث] ❌ استثناء في startListening:',
+      e.message
+    );
+
     scheduleRestart(10000);
   }
 }
 
-// ─── جدولة إعادة الاتصال: لا تُكرر إذا كانت جارية ───
 function scheduleRestart(delay) {
-  // ⚠️ لا نتجاهل الطلب إذا أتى من uncaughtException — isRestarting تُعاد ضبطها قبل الاستدعاء
+
   if (isRestarting) return;
+
   isRestarting = true;
 
-  try { if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; } } catch (e) {}
-  try { if (appstateSaverInterval) { clearInterval(appstateSaverInterval); appstateSaverInterval = null; } } catch (e) {}
-  try { if (msgEmitter && typeof msgEmitter.stop === 'function') msgEmitter.stop(); } catch (e) {}
+  try {
+    if (heartbeatInterval) {
+      clearInterval(
+        heartbeatInterval
+      );
+
+      heartbeatInterval = null;
+    }
+  } catch (e) {}
+
+  try {
+    if (appstateSaverInterval) {
+      clearInterval(
+        appstateSaverInterval
+      );
+
+      appstateSaverInterval = null;
+    }
+  } catch (e) {}
+
+  try {
+    if (
+      msgEmitter &&
+      typeof msgEmitter.stop ===
+      'function'
+    ) {
+      msgEmitter.stop();
+    }
+  } catch (e) {}
 
   msgEmitter = null;
   botApi = null;
+
   writeBotState(false);
 
-  // تأخير ثابت بحد أقصى 120 ثانية — لا مضاعفة تتراكم عبر جلسات ناجحة
-  const actualDelay = Math.min(delay, 120000);
+  const actualDelay =
+    Math.min(
+      Math.max(
+        Number(delay) || 0,
+        1000
+      ),
+      120000
+    );
+
   reconnectAttempts++;
-  console.log(`[الث] ⏳ إعادة الاتصال بعد ${actualDelay / 1000}ث (محاولة ${reconnectAttempts})`);
+
+  console.log(
+    `[الث] ⏳ إعادة الاتصال بعد ${actualDelay / 1000}ث (محاولة ${reconnectAttempts})`
+  );
 
   setTimeout(() => {
+
     isRestarting = false;
+
     startBot();
+
   }, actualDelay);
 }
 

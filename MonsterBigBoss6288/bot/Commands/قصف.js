@@ -6,7 +6,7 @@ const SPAM_START = `☣️【 الث】☣️
 
 const SPAM_STOP = `☣️【 الث】☣️
 
-⚠️ ⚡️ [ تـ٠ــمْ إيـ٠ــقـ٠ــاـ٠ــفْ الـ٠ــجـ٠ــرـ٠ــاـ٠ــئـ٠ــدـ٠ـــ ] ⚡️ ⚠️
+⚠️ ⚡️ [ تـ٠ــمْ إيـ٠ـــ٠ــاـ٠ـالثالـ٠ــجـ٠ــرـ٠ــاـ٠ــئـ٠ــدـ٠ـــ ] ⚡️ ⚠️
 
 ─── 𓆩🖤𓆪 ───`;
 
@@ -39,12 +39,8 @@ const NEWSPAPER_1 = `رد آلي
 🅐•🪽⌯❄🍀-🅛🪘-🎶ྂྂ
 ☂✿ ⚡☸⚡🅣🍺
 💣⋆ℱ🅗Ꮬ⋆✺🎻🩸
-🅐•🪽⌯❄🍀-🅛🪘-🎶ྂྂ
-☂✿ ⚡☸⚡🅣🍺
-💣⋆ℱ🅗Ꮬ⋆✺🎻🩸
-
-𖤓﮼𝘽 ِٚ𝙇 َِ𝘼 َِ𝘾 َِ𝙆 •ِٚ𝙇 َِ𝘼 ََِ𝙍 َِ𝙀 َِ𝙉 ِٚ𝙕 𖤓﮼
-{𖤓بـــلاك لاريـــنــز الدمــــــويــه𖤓}ـ🪽⌯❄🍀-🅛🪘-🎶ྂྂ
+🅐•🪽⌯❄🍀-🅛
+🪽⌯❄🍀-🅛🪘-🎶ྂྂ
 ☂✿ ⚡☸⚡🅣🍺
 💣⋆ℱ🅗Ꮬ⋆✺🎻🩸
 🅐•🪽⌯❄🍀-🅛🪘-🎶ྂྂ
@@ -136,7 +132,7 @@ async function sendTyping(api, threadID, isTyping) {
       mqttClient.publish('/ls_req', JSON.stringify(wsContent), {}, (err) => err ? reject(err) : resolve())
     );
   } catch (e) {
-    console.error(`[قصف] خطأ typing:`, e.message || e);
+    console.error(`[ويس] خطأ typing:`, e.message || e);
   }
 }
 
@@ -154,26 +150,26 @@ async function spamLoop(api, threadID) {
       await sendTyping(api, threadID, false);
 
       await api.sendMessage(text, threadID);
-      console.log(`[قصف] ✍️ جريدة #${cycleIndex + 1} (كتابة ${(typingTime/1000).toFixed(1)}ث) | تأخير ${(delay/1000).toFixed(0)}ث`);
+      console.log(`[ويس] ✍️ جريدة #${cycleIndex + 1} (كتابة ${(typingTime/1000).toFixed(1)}ث) | تأخير ${(delay/1000).toFixed(0)}ث`);
       await sleep(delay);
       cycleIndex++;
     } catch (e) {
-      console.error(`[قصف] خطأ في الإرسال:`, e.message || e);
+      console.error(`[ويس] خطأ في الإرسال:`, e.message || e);
       await sendTyping(api, threadID, false);
       await sleep(5000);
     }
   }
-  console.log(`[قصف] توقف الحلقة في ${threadID}`);
+  console.log(`[ويس] توقف الحلقة في ${threadID}`);
 }
 
 module.exports = {
-  name: 'قصف',
+  name: 'ويس',
 
   async execute(api, event) {
     const threadID = String(event.threadID);
     const body = (event.body || '').trim();
 
-    if (body === 'قصف ايقاف' || body === 'قصف إيقاف') {
+    if (body === 'ويس ايقاف' || body === 'ويس إيقاف') {
       if (activeLoops.get(threadID)) {
         activeLoops.set(threadID, false);
         try { await api.sendMessage(SPAM_STOP, threadID); } catch (e) {}
@@ -183,7 +179,7 @@ module.exports = {
       return;
     }
 
-    if (body === 'قصف') {
+    if (body === 'ويس') {
       if (activeLoops.get(threadID)) {
         try { await api.sendMessage('⚠️ الجرائد تعمل بالفعل!', threadID); } catch (e) {}
         return;
@@ -201,7 +197,7 @@ module.exports = {
   resumeAll(api) {
     for (const [threadID, active] of activeLoops.entries()) {
       if (active) {
-        console.log(`[قصف] استئناف الحلقة في ${threadID} بعد الاتصال`);
+        console.log(`[ويس] استئناف الحلقة في ${threadID} بعد الاتصال`);
         spamLoop(api, threadID);
       }
     }
