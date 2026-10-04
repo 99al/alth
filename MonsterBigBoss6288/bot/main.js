@@ -2,21 +2,25 @@ const fs = require('fs');
 const path = require('path');
 
 // ─── قراءة المشرفين من ملف admins-config.json ───
-function loadAdmins() {
+function loadAdmins(configPath = path.join(__dirname, 'admins-config.json')) {
   try {
-    const raw = fs.readFileSync(
-      path.join(__dirname, 'admins-config.json'),
-      'utf8'
-    );
+    const raw = fs.readFileSync(configPath, 'utf8');
 
     const config = JSON.parse(raw);
 
-    return new Set((config.admins || []).map(String));
-  } catch (e) {
-    return new Set([
-      '100041346095449',
-      '100041346095449'
-    ]);
+    if (
+      !config ||
+      typeof config !== 'object' ||
+      Array.isArray(config) ||
+      !Array.isArray(config.admins) ||
+      config.admins.some(id => typeof id !== 'string' || !/^[1-9]\d*$/.test(id))
+    ) {
+      return new Set();
+    }
+
+    return new Set(config.admins);
+  } catch {
+    return new Set();
   }
 }
 
@@ -56,9 +60,7 @@ function loadCommands() {
   const commandsPath = path.join(__dirname, 'Commands');
 
   if (!fs.existsSync(commandsPath)) {
-    console.error(
-      `[الث] ❌ مجلد Commands غير موجود: ${commandsPath}`
-    );
+    console.error('[الث] تعذر تحميل الأوامر.');
 
     commands.clear();
     return;
@@ -80,29 +82,18 @@ function loadCommands() {
       const cmd = require(filePath);
 
       if (!cmd || !cmd.name) {
-        console.error(
-          `[الث] ⚠️ الملف ${file} لا يحتوي على name`
-        );
+        console.error('[الث] تم تجاهل تعريف أمر غير صالح.');
         continue;
       }
 
       commands.set(cmd.name, cmd);
 
-      console.log(
-        `[الث] ✅ تم تحميل: ${cmd.name}`
-      );
-
-    } catch (e) {
-      console.error(
-        `[الث] ❌ خطأ في تحميل ${file}:`,
-        e.message || e
-      );
+    } catch {
+      console.error('[الث] تعذر تحميل أحد الأوامر.');
     }
   }
 
-  console.log(
-    `[الث] ✅ تم تحميل ${commands.size} أمر.`
-  );
+  console.log('[الث] اكتمل تحميل الأوامر.');
 }
 
 // ─── التحقق من تفعيل الأمر ───
@@ -148,10 +139,6 @@ async function handleMessage(api, event) {
     event.senderID || ''
   );
 
-  console.log(
-    `[الث] 📩 رسالة من ${senderID} في ${threadID}: "${body.substring(0, 60)}"`
-  );
-
   // ─── عداد الرسائل ───
   // يتفاعل البوت عند الرسالة 568
   // وكل مضاعفاتها
@@ -180,9 +167,7 @@ async function handleMessage(api, event) {
           )
         ];
 
-      console.log(
-        `[الث] 🎯 رسالة #${next} في ${threadID} — تفاعل بـ ${emoji}`
-      );
+      console.log('[الث] تم تنفيذ تفاعل الرسائل الدوري.');
 
       try {
         if (
@@ -195,11 +180,8 @@ async function handleMessage(api, event) {
           );
         }
 
-      } catch (e) {
-        console.error(
-          '[الث] ❌ خطأ في التفاعل:',
-          e.message || e
-        );
+      } catch {
+        console.error('[الث] تعذر تنفيذ تفاعل الرسالة.');
       }
     }
   }
@@ -217,11 +199,8 @@ async function handleMessage(api, event) {
         api,
         event
       );
-    } catch (e) {
-      console.error(
-        '[الث] ❌ خطأ في checkAutoReply:',
-        e.message || e
-      );
+    } catch {
+      console.error('[الث] تعذر فحص الرد التلقائي.');
     }
   }
 
@@ -248,12 +227,7 @@ async function handleMessage(api, event) {
     ) {
       Promise.resolve(
         cmd.execute(api, event)
-      ).catch(e =>
-        console.error(
-          '[الث] ❌ خطأ في ويس:',
-          e.message || e
-        )
-      );
+      ).catch(() => console.error('[الث] تعذر تنفيذ الأمر.'));
     }
 
     return;
@@ -282,12 +256,7 @@ async function handleMessage(api, event) {
     ) {
       Promise.resolve(
         cmd.execute(api, event)
-      ).catch(e =>
-        console.error(
-          '[الث] ❌ خطأ في جرائد:',
-          e.message || e
-        )
-      );
+      ).catch(() => console.error('[الث] تعذر تنفيذ الأمر.'));
     }
 
     return;
@@ -316,12 +285,7 @@ async function handleMessage(api, event) {
     ) {
       Promise.resolve(
         cmd.execute(api, event)
-      ).catch(e =>
-        console.error(
-          '[الث] ❌ خطأ في كاتش/مجموعة:',
-          e.message || e
-        )
-      );
+      ).catch(() => console.error('[الث] تعذر تنفيذ الأمر.'));
     }
 
     return;
@@ -349,12 +313,7 @@ async function handleMessage(api, event) {
     ) {
       Promise.resolve(
         cmd.execute(api, event)
-      ).catch(e =>
-        console.error(
-          '[الث] ❌ خطأ في رد:',
-          e.message || e
-        )
-      );
+      ).catch(() => console.error('[الث] تعذر تنفيذ الأمر.'));
     }
 
     return;
@@ -377,12 +336,7 @@ async function handleMessage(api, event) {
     ) {
       Promise.resolve(
         cmd.execute(api, event)
-      ).catch(e =>
-        console.error(
-          '[الث] ❌ خطأ في يوت:',
-          e.message || e
-        )
-      );
+      ).catch(() => console.error('[الث] تعذر تنفيذ الأمر.'));
     }
 
     return;
@@ -409,12 +363,7 @@ async function handleMessage(api, event) {
     ) {
       Promise.resolve(
         cmd.execute(api, event)
-      ).catch(e =>
-        console.error(
-          '[الث] ❌ خطأ في Files:',
-          e.message || e
-        )
-      );
+      ).catch(() => console.error('[الث] تعذر تنفيذ الأمر.'));
     }
 
     return;
@@ -430,6 +379,7 @@ function handleEvent(api, event) {
 
 // ─── تصدير الدوال إلى index.js ───
 module.exports = {
+  loadAdmins,
   loadCommands,
   handleMessage,
   handleEvent

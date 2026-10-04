@@ -3,6 +3,7 @@ const path = require('path');
 const express = require('express');
 const { login } = require('ws3-fca');
 const { loadCommands, handleMessage, handleEvent } = require('./main');
+const security = require('./security.cjs');
 
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -18,7 +19,22 @@ let heartbeatInterval = null;
 let appstateSaverInterval = null;
 let lastReconnectRequest = 0;
 
-app.get('/', (req, res) => {
+function requireDashboardAuth(req, res, next) {
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (!security.authIsConfigured()) {
+    return res.status(503).json({ error: 'Dashboard authentication is not configured.' });
+  }
+  if (!security.hasValidSessionCookie(req.headers.cookie)) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+  if (!security.isAllowedOrigin(req.headers.origin)) {
+    return res.status(403).json({ error: 'Request origin is not allowed.' });
+  }
+  next();
+}
+
+app.get('/', requireDashboardAuth, (req, res) => {
   res.json({
     status: botApi ? '🟢 بوت الث يعمل' : '🔴 جاري إعادة الاتصال...',
     bot: 'الث',
@@ -33,7 +49,7 @@ app.get('/ping', (req, res) => {
   res.send('pong - الث حي ويعمل 💀');
 });
 
-app.post('/reconnect', (req, res) => {
+app.post('/reconnect', requireDashboardAuth, (req, res) => {
   const now = Date.now();
 
   if (now - lastReconnectRequest < 10000) {
@@ -56,7 +72,7 @@ app.post('/reconnect', (req, res) => {
   setTimeout(() => scheduleRestart(3000), 200);
 });
 
-app.get('/testsend', async (req, res) => {
+app.get('/testsend', requireDashboardAuth, async (req, res) => {
   const threadID = req.query.thread;
 
   if (!threadID || !botApi) {
@@ -72,21 +88,19 @@ app.get('/testsend', async (req, res) => {
     );
 
     res.json({
-      success: true,
-      threadID
+      success: true
     });
-  } catch (e) {
+  } catch {
     res.status(500).json({
-      error: e.message
+      error: 'تعذر إرسال رسالة الاختبار.'
     });
   }
 });
 
-app.post('/updatecookies', express.json(), (req, res) => {
-  const appstatePath = path.join(
-    __dirname,
-    'appstate.json'
-  );
+app.post('/updatecookies', requireDashboardAuth, express.json({ limit: '256kb' }), (req, res) => {
+  if (!security.canWriteAppstate()) {
+    return res.status(409).json({ error: security.appstateUpdateConflictMessage() });
+  }
 
   try {
     const cookies = req.body;
@@ -97,10 +111,7 @@ app.post('/updatecookies', express.json(), (req, res) => {
       });
     }
 
-    fs.writeFileSync(
-      appstatePath,
-      JSON.stringify(cookies, null, 2)
-    );
+    security.writeAppstate(cookies);
 
     console.log(
       '[الث] ✅ تم تحديث الكوكيز عبر HTTP'
@@ -112,9 +123,9 @@ app.post('/updatecookies', express.json(), (req, res) => {
     });
 
     scheduleRestart(3000);
-  } catch (e) {
+  } catch {
     res.status(500).json({
-      error: e.message
+      error: 'تعذر تحديث جلسة البوت.'
     });
   }
 });
@@ -174,8 +185,7 @@ function startHeartbeat(api) {
       }
     } catch (e) {
       console.error(
-        '[الث] ⚠️ Heartbeat failed:',
-        e.message
+        '[الث] ⚠️ Heartbeat failed (تفاصيل الخطأ محجوبة)'
       );
     }
   }, 30000);
@@ -231,6 +241,8 @@ function startMemorySweeper(api) {
 
 function saveAppstate(api, reason) {
   try {
+    if (!security.canWriteAppstate()) return;
+
     if (
       !api ||
       typeof api.getAppState !== 'function'
@@ -241,10 +253,7 @@ function saveAppstate(api, reason) {
     const state = api.getAppState();
 
     if (state && state.length > 0) {
-      fs.writeFileSync(
-        path.join(__dirname, 'appstate.json'),
-        JSON.stringify(state, null, 2)
-      );
+      security.writeAppstate(state);
 
       if (reason) {
         console.log(
@@ -254,13 +263,14 @@ function saveAppstate(api, reason) {
     }
   } catch (e) {
     console.error(
-      '[الث] ⚠️ فشل حفظ appstate:',
-      e.message
+      '[الث] ⚠️ فشل حفظ appstate (تفاصيل الخطأ محجوبة)'
     );
   }
 }
 
 function startAppstateSaver(api) {
+  if (!security.canWriteAppstate()) return;
+
   if (appstateSaverInterval) {
     clearInterval(appstateSaverInterval);
   }
@@ -274,12 +284,9 @@ function startAppstateSaver(api) {
   );
 }
 
-process.on('uncaughtException', err => {
+process.on('uncaughtException', () => {
   console.error(
-    '[الث] 🔴 خطأ غير متوقع:',
-    err && err.message
-      ? err.message
-      : String(err)
+    '[الث] 🔴 خطأ غير متوقع (تفاصيل الخطأ محجوبة)'
   );
 
   console.log(
@@ -290,25 +297,9 @@ process.on('uncaughtException', err => {
   scheduleRestart(10000);
 });
 
-process.on('unhandledRejection', reason => {
-  const msg =
-    reason && reason.message
-      ? reason.message
-      : String(reason);
-
-  if (
-    msg.includes('Cookie not in this host') ||
-    msg.includes("host's domain")
-  ) {
-    console.warn(
-      '[الث] ⚠️ تحذير cookie domain — تجاهل'
-    );
-    return;
-  }
-
+process.on('unhandledRejection', () => {
   console.error(
-    '[الث] 🔴 وعد غير معالج:',
-    msg
+    '[الث] 🔴 وعد غير معالج (تفاصيل السبب محجوبة)'
   );
 
   isRestarting = false;
@@ -330,33 +321,13 @@ process.on('SIGHUP', () => {
 function startBot() {
   if (isRestarting) return;
 
-  const appstatePath = path.join(
-    __dirname,
-    'appstate.json'
-  );
-
-  if (!fs.existsSync(appstatePath)) {
-    console.error(
-      '[الث] ❌ appstate.json غير موجود'
-    );
-
-    setTimeout(startBot, 30000);
-    return;
-  }
-
   let appstate;
 
   try {
-    appstate = JSON.parse(
-      fs.readFileSync(
-        appstatePath,
-        'utf8'
-      )
-    );
+    appstate = security.loadAppstate().appstate;
   } catch (e) {
     console.error(
-      '[الث] ❌ خطأ في قراءة appstate.json:',
-      e.message
+      '[الث] ❌ تعذر تحميل إعداد الجلسة (تفاصيل الخطأ محجوبة)'
     );
 
     setTimeout(startBot, 30000);
@@ -383,18 +354,14 @@ function startBot() {
     (err, api) => {
 
       if (err) {
-        const errStr =
-          JSON.stringify(err);
-
         console.error(
-          '[الث] ❌ فشل تسجيل الدخول:',
-          errStr
+          '[الث] ❌ فشل تسجيل الدخول (تفاصيل الخطأ محجوبة)'
         );
 
         const errMsg = String(
           err.message ||
           err.error ||
-          errStr
+          err
         );
 
         if (
@@ -464,7 +431,7 @@ function startBot() {
         status: 'متصل ويعمل'
       });
 
-      try {
+      if (security.canWriteAppstate()) try {
         if (
           typeof api.getAppState ===
           'function'
@@ -476,20 +443,11 @@ function startBot() {
             state &&
             state.length > 0
           ) {
-            fs.writeFileSync(
-              appstatePath,
-              JSON.stringify(
-                state,
-                null,
-                2
-              )
-            );
+            security.writeAppstate(state);
           }
         }
 
-        console.log(
-          '[الث] 💾 تم تحديث appstate.json'
-        );
+        console.log('[الث] 💾 تم تحديث جلسة التطوير المحلية');
       } catch (e) {}
 
       const ctx = api.ctx;
@@ -498,7 +456,7 @@ function startBot() {
         ctx.firstListen = true;
 
         console.log(
-          `[الث] 🔑 Sequence ID: ${ctx.lastSeqId}`
+          '[الث] 🔑 تم العثور على Sequence ID (القيمة محجوبة)'
         );
       } else {
         console.log(
@@ -533,8 +491,7 @@ function startBot() {
         }
       } catch (e) {
         console.error(
-          '[الث] خطأ في استئناف ويس:',
-          e.message
+          '[الث] خطأ في استئناف ويس (تفاصيل الخطأ محجوبة)'
         );
       }
 
@@ -589,8 +546,7 @@ async function startListening(api) {
       if (err) {
 
         console.error(
-          '[الث] ⚠️ خطأ في الاستماع:',
-          JSON.stringify(err)
+          '[الث] ⚠️ خطأ في الاستماع (تفاصيل الخطأ محجوبة)'
         );
 
         const errMsg = String(
@@ -631,27 +587,12 @@ async function startListening(api) {
         const type =
           event.type || 'unknown';
 
-        const threadID =
-          String(
-            event.threadID || ''
-          );
-
-        const senderID =
-          String(
-            event.senderID || ''
-          );
-
-        const body =
-          String(
-            event.body || ''
-          ).substring(0, 50);
-
         if (
           type !== 'typ' &&
           type !== 'read_receipt'
         ) {
           console.log(
-            `[الث] 📩 type=${type} thread=${threadID} sender=${senderID} body="${body}"`
+            '[الث] 📩 حدث وارد'
           );
         }
 
@@ -684,8 +625,7 @@ async function startListening(api) {
       } catch (e) {
 
         console.error(
-          '[الث] ⚠️ خطأ في معالجة الحدث:',
-          e.message
+          '[الث] ⚠️ خطأ في معالجة الحدث (تفاصيل الخطأ محجوبة)'
         );
       }
     };
@@ -702,8 +642,7 @@ async function startListening(api) {
   } catch (e) {
 
     console.error(
-      '[الث] ❌ استثناء في startListening:',
-      e.message
+      '[الث] ❌ استثناء في startListening (تفاصيل الخطأ محجوبة)'
     );
 
     scheduleRestart(10000);
