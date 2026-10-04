@@ -8,6 +8,128 @@ const security = require('./security.cjs');
 const PORT = process.env.PORT || 3000;
 const app = express();
 
+const authRateLimiter = security.createLoginRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  globalMaxAttempts: 20,
+});
+
+const LOGIN_PAGE_HTML = `<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>دخول لوحة البوت</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 28rem; margin: 12vh auto; padding: 0 1rem; }
+    input, button { box-sizing: border-box; width: 100%; padding: .75rem; margin-top: .75rem; }
+    #message { min-height: 1.5em; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>دخول لوحة البوت</h1>
+    <form id="login-form">
+      <label for="password">كلمة المرور</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="512">
+      <button type="submit">دخول</button>
+      <p id="message" role="status" aria-live="polite"></p>
+    </form>
+  </main>
+  <script>
+    const form = document.getElementById('login-form');
+    const message = document.getElementById('message');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      message.textContent = 'جارٍ التحقق…';
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: form.elements.password.value })
+        });
+        if (response.ok) {
+          window.location.reload();
+          return;
+        }
+        message.textContent = response.status === 429
+          ? 'محاولات كثيرة. حاول لاحقًا.'
+          : response.status === 403
+            ? 'تعذر التحقق من مصدر الطلب.'
+            : 'تعذر تسجيل الدخول.';
+      } catch {
+        message.textContent = 'تعذر إكمال الطلب.';
+      }
+    });
+  </script>
+</body>
+</html>`;
+
+const AUTHENTICATED_STATUS_HTML = Object.freeze({
+  running: '<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><title>حالة البوت</title><h1>حالة البوت</h1><p>البوت يعمل.</p></html>',
+  reconnecting: '<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><title>حالة البوت</title><h1>حالة البوت</h1><p>البوت غير متصل حاليًا.</p></html>',
+});
+
+function setNoStore(res) {
+  res.setHeader('Cache-Control', 'no-store');
+}
+
+function checkAuthAttemptLimit(res) {
+  const attempt = authRateLimiter.attempt();
+  if (attempt.allowed) return true;
+  res.setHeader('Retry-After', String(attempt.retryAfterSeconds));
+  res.status(429).json({ error: 'Too many authentication attempts.' });
+  return false;
+}
+
+function checkLoginAttemptLimit(req, res, next) {
+  if (!checkAuthAttemptLimit(res)) return;
+  next();
+}
+
+function requireAllowedOrigin(req, res) {
+  if (security.isAllowedOrigin(req.headers.origin)) return true;
+  res.status(403).json({ error: 'Request origin is not allowed.' });
+  return false;
+}
+
+function validateAuthMutation(req, res, next) {
+  setNoStore(res);
+  if (!requireAllowedOrigin(req, res)) return;
+  next();
+}
+
+function respondWithSafeRequestError(err, req, res, next) {
+  if (res.headersSent) return;
+  setNoStore(res);
+  res.status(400).json({ error: 'Invalid request.' });
+}
+
+app.get('/api/auth/session', (req, res) => {
+  setNoStore(res);
+  return res.json({
+    authenticated: security.authIsConfigured() &&
+      security.hasValidSessionCookie(req.headers.cookie),
+  });
+});
+
+app.post('/api/auth/login', validateAuthMutation, checkLoginAttemptLimit, express.json({ limit: '2kb' }), (req, res) => {
+  if (!security.authIsConfigured()) {
+    return res.status(503).json({ error: 'Authentication unavailable.' });
+  }
+  if (!security.passwordMatches(req.body && req.body.password)) {
+    return res.status(401).json({ error: 'Invalid credentials.' });
+  }
+  res.setHeader('Set-Cookie', security.createSessionCookieHeader());
+  return res.json({ authenticated: true });
+});
+
+app.post('/api/auth/logout', validateAuthMutation, (req, res) => {
+  res.setHeader('Set-Cookie', security.clearSessionCookieHeader());
+  return res.json({ authenticated: false });
+});
+
+
+
 let botApi = null;
 let msgEmitter = null;
 let isRestarting = false;
@@ -34,15 +156,13 @@ function requireDashboardAuth(req, res, next) {
   next();
 }
 
-app.get('/', requireDashboardAuth, (req, res) => {
-  res.json({
-    status: botApi ? '🟢 بوت الث يعمل' : '🔴 جاري إعادة الاتصال...',
-    bot: 'الث',
-    loggedIn: !!botApi,
-    uptime: Math.floor(process.uptime()) + ' ثانية',
-    reconnectAttempts,
-    timestamp: new Date().toISOString()
-  });
+app.get('/', (req, res) => {
+  setNoStore(res);
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  const authenticated = security.authIsConfigured() &&
+    security.hasValidSessionCookie(req.headers.cookie);
+  if (!authenticated) return res.send(LOGIN_PAGE_HTML);
+  return res.send(botApi ? AUTHENTICATED_STATUS_HTML.running : AUTHENTICATED_STATUS_HTML.reconnecting);
 });
 
 app.get('/ping', (req, res) => {
@@ -129,6 +249,7 @@ app.post('/updatecookies', requireDashboardAuth, express.json({ limit: '256kb' }
     });
   }
 });
+app.use(respondWithSafeRequestError);
 
 app.listen(PORT, () => {
   console.log(
