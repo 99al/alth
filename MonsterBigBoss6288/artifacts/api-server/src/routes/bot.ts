@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import fs from "fs";
 import path from "path";
+import { createRequire } from "node:module";
 import {
   GetBotStatusResponse,
   UpdateBotCookiesBody,
@@ -15,12 +16,20 @@ const router: IRouter = Router();
 
 // At runtime, import.meta.dirname = artifacts/api-server/dist/
 // So: dist/ → api-server/ → artifacts/ → workspace root → bot/
-const BOT_DIR = path.join(import.meta.dirname, "..", "..", "..", "bot");
+export const BOT_DIR = path.join(import.meta.dirname, "..", "..", "..", "bot");
+const require = createRequire(import.meta.url);
+const security = require(path.join(BOT_DIR, "security.cjs")) as {
+  SESSION_COOKIE_NAME: string;
+  getCookieToken(cookieHeader: string | undefined): string | null;
+  canWriteAppstate(): boolean;
+  appstateUpdateConflictMessage(): string;
+  writeAppstate(value: unknown): void;
+};
 const STATE_FILE = path.join(BOT_DIR, "bot-state.json");
-const APPSTATE_FILE = path.join(BOT_DIR, "appstate.json");
 const COMMANDS_CONFIG_FILE = path.join(BOT_DIR, "commands-config.json");
 const ADMINS_CONFIG_FILE = path.join(BOT_DIR, "admins-config.json");
 const COMMANDS_DIR = path.join(BOT_DIR, "Commands");
+const ADMIN_ID_PATTERN = /^[1-9]\d*$/;
 
 // Command descriptions in Arabic
 const COMMAND_DESCRIPTIONS: Record<string, string> = {
@@ -65,9 +74,14 @@ router.get("/bot/status", async (_req, res): Promise<void> => {
 
 // POST /bot/cookies
 router.post("/bot/cookies", async (req, res): Promise<void> => {
+  if (!security.canWriteAppstate()) {
+    res.status(409).json({ error: security.appstateUpdateConflictMessage() });
+    return;
+  }
+
   const parsed = UpdateBotCookiesBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "بيانات غير صالحة: " + parsed.error.message });
+    res.status(400).json({ error: "بيانات الكوكيز غير صالحة" });
     return;
   }
 
@@ -78,23 +92,33 @@ router.post("/bot/cookies", async (req, res): Promise<void> => {
   }
 
   try {
-    writeJsonFile(APPSTATE_FILE, cookies);
+    security.writeAppstate(cookies);
     logger.info("Bot appstate updated via control panel");
 
     // أبلغ البوت بإعادة الاتصال عبر الـ internal server على port 3000
     try {
       const botPort = process.env.BOT_INTERNAL_PORT || "3000";
-      const resp = await fetch(`http://localhost:${botPort}/reconnect`, { method: "POST" });
+      const forwardHeaders: Record<string, string> = {};
+      const cookieToken = security.getCookieToken(req.get("cookie"));
+      const originHeader = req.get("origin");
+      if (cookieToken) {
+        forwardHeaders.cookie = `${security.SESSION_COOKIE_NAME}=${cookieToken}`;
+      }
+      if (originHeader) forwardHeaders.origin = originHeader;
+      const resp = await fetch(`http://localhost:${botPort}/reconnect`, {
+        method: "POST",
+        headers: forwardHeaders,
+      });
       if (resp.ok) {
         logger.info("Bot reconnect triggered successfully");
       }
-    } catch (fetchErr) {
-      logger.warn({ fetchErr }, "Could not reach bot internal server — bot will reconnect on next cycle");
+    } catch {
+      logger.warn("Could not reach bot internal server — bot will reconnect on next cycle");
     }
 
     res.json({ success: true, message: "تم تحديث الكوكيز. البوت يعيد الاتصال الآن..." });
-  } catch (err) {
-    logger.error({ err }, "Failed to write appstate file");
+  } catch {
+    logger.error("Failed to write appstate file");
     res.status(500).json({ error: "فشل في حفظ الكوكيز" });
   }
 });
@@ -208,8 +232,14 @@ router.post("/bot/commands/:name/toggle", async (req, res): Promise<void> => {
 // ─── Admin routes ───
 
 function readAdmins(): string[] {
-  const config = readJsonFile<{ admins: string[] }>(ADMINS_CONFIG_FILE, { admins: [] });
-  return (config.admins || []).map(String);
+  const config = readJsonFile<{ admins: unknown }>(ADMINS_CONFIG_FILE, { admins: [] });
+  if (
+    !Array.isArray(config.admins) ||
+    !config.admins.every((id: unknown): id is string => typeof id === "string" && ADMIN_ID_PATTERN.test(id))
+  ) {
+    return [];
+  }
+  return config.admins;
 }
 
 function saveAdmins(admins: string[]): void {
@@ -227,27 +257,26 @@ router.get("/bot/admins", async (_req, res): Promise<void> => {
 router.post("/bot/admins", async (req, res): Promise<void> => {
   const parsed = AddBotAdminBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "معرف غير صالح: " + parsed.error.message });
+    res.status(400).json({ error: "معرف مشرف غير صالح" });
     return;
   }
 
-  const { id } = parsed.data;
-  if (!id || !/^\d+$/.test(id.trim())) {
-    res.status(400).json({ error: "يجب أن يكون المعرف أرقاماً فقط" });
+  const id = parsed.data.id.trim();
+  if (!ADMIN_ID_PATTERN.test(id)) {
+    res.status(400).json({ error: "يجب أن يكون المعرف رقماً موجباً دون أصفار بادئة" });
     return;
   }
 
   const admins = readAdmins();
-  const trimmedId = id.trim();
 
-  if (admins.includes(trimmedId)) {
+  if (admins.includes(id)) {
     res.status(400).json({ error: "المعرف موجود بالفعل في قائمة المشرفين" });
     return;
   }
 
-  admins.push(trimmedId);
+  admins.push(id);
   saveAdmins(admins);
-  logger.info({ id: trimmedId }, "Admin added");
+  logger.info("Admin added");
 
   const data = GetBotAdminsResponse.parse({ admins });
   res.json(data);
@@ -257,18 +286,22 @@ router.post("/bot/admins", async (req, res): Promise<void> => {
 router.delete("/bot/admins/:id", async (req, res): Promise<void> => {
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const id = decodeURIComponent(raw).trim();
+  if (!ADMIN_ID_PATTERN.test(id)) {
+    res.status(400).json({ error: "معرف مشرف غير صالح" });
+    return;
+  }
 
   const admins = readAdmins();
   const idx = admins.indexOf(id);
 
   if (idx === -1) {
-    res.status(404).json({ error: `المعرف "${id}" غير موجود في قائمة المشرفين` });
+    res.status(404).json({ error: "المشرف غير موجود في القائمة" });
     return;
   }
 
   admins.splice(idx, 1);
   saveAdmins(admins);
-  logger.info({ id }, "Admin removed");
+  logger.info("Admin removed");
 
   const data = GetBotAdminsResponse.parse({ admins });
   res.json(data);
