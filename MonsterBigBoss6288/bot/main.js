@@ -24,8 +24,7 @@ function loadAdmins(configPath = path.join(__dirname, 'admins-config.json')) {
   }
 }
 
-const ADMINS = loadAdmins();
-const commands = new Map();
+const commandRegistry = new Map();
 
 // ─── عداد الرسائل لكل جروب ───
 // كل 568 رسالة يتفاعل البوت
@@ -62,7 +61,7 @@ function loadCommands() {
   if (!fs.existsSync(commandsPath)) {
     console.error('[الث] تعذر تحميل الأوامر.');
 
-    commands.clear();
+    commandRegistry.clear();
     return;
   }
 
@@ -70,7 +69,7 @@ function loadCommands() {
     .readdirSync(commandsPath)
     .filter(f => f.endsWith('.js'));
 
-  commands.clear();
+  commandRegistry.clear();
 
   for (const file of files) {
     try {
@@ -86,7 +85,7 @@ function loadCommands() {
         continue;
       }
 
-      commands.set(cmd.name, cmd);
+      commandRegistry.set(cmd.name, cmd);
 
     } catch {
       console.error('[الث] تعذر تحميل أحد الأوامر.');
@@ -124,10 +123,14 @@ function isCommandEnabled(name) {
 }
 
 // ─── معالجة الرسائل ───
-async function handleMessage(api, event) {
+async function handleMessage(api, event, dependencies = {}) {
   if (!event || !event.body) {
     return;
   }
+
+  const commands = dependencies.commands || commandRegistry;
+  const canAdmin = dependencies.isAdmin || isAdmin;
+  const commandEnabled = dependencies.isCommandEnabled || isCommandEnabled;
 
   const body = String(event.body || '').trim();
 
@@ -202,6 +205,63 @@ async function handleMessage(api, event) {
     } catch {
       console.error('[الث] تعذر فحص الرد التلقائي.');
     }
+  }
+
+  // ─── إيقاف حلقات تغيير الأسماء في المحادثة الحالية ───
+  if (/^(?:إيقاف|ايقاف) الاسم$/u.test(body)) {
+    if (!canAdmin(senderID)) {
+      return;
+    }
+
+    const stopped = cancelActiveNameLoops(threadID, commands) > 0;
+    const response = stopped
+      ? '⏹️ تم إيقاف عمليات تغيير الأسماء والكنيات وحماياتها ومؤقتاتها في هذه المحادثة.'
+      : 'ℹ️ لا توجد عمليات تغيير أسماء نشطة في هذه المحادثة.';
+
+    if (api && typeof api.sendMessage === 'function') {
+      Promise.resolve(api.sendMessage(response, threadID))
+        .catch(() => console.error('[الث] تعذر إرسال تأكيد إيقاف الأسماء.'));
+    }
+
+    return;
+  }
+
+  // ─── أمر الكنية ومرادفه ───
+  if (/^(?:هويه|هوية)(?:\s+|$)/u.test(body)) {
+    if (!canAdmin(senderID)) {
+      return;
+    }
+
+    if (!commandEnabled('هويه')) {
+      return;
+    }
+
+    const cmd = commands.get('هويه');
+    if (cmd && typeof cmd.execute === 'function') {
+      Promise.resolve(cmd.execute(api, event))
+        .catch(() => console.error('[الث] تعذر تنفيذ أمر الكنية.'));
+    }
+
+    return;
+  }
+
+  // ─── أمر تغيير اسم المجموعة وتشغيل حمايته ───
+  if (/^قروب(?:\s+|$)/u.test(body)) {
+    if (!canAdmin(senderID)) {
+      return;
+    }
+
+    if (!commandEnabled('قروب')) {
+      return;
+    }
+
+    const cmd = commands.get('قروب');
+    if (cmd && typeof cmd.execute === 'function') {
+      Promise.resolve(cmd.execute(api, event))
+        .catch(() => console.error('[الث] تعذر تنفيذ أمر اسم المجموعة.'));
+    }
+
+    return;
   }
 
   // ─── أمر ويس ───
@@ -370,6 +430,33 @@ async function handleMessage(api, event) {
   }
 }
 
+function cancelActiveNameLoops(threadID, commandMap = commandRegistry) {
+  const isThreadScoped = threadID !== undefined && threadID !== null;
+  const targetThread = isThreadScoped ? String(threadID) : undefined;
+  let cancelled = 0;
+
+  for (const name of ['هويه', 'قروب', 'كاتش']) {
+    const command = commandMap.get(name);
+    if (!command) continue;
+
+    try {
+      const result = isThreadScoped
+        ? typeof command.cancel === 'function' && command.cancel(targetThread)
+        : typeof command.cancelAll === 'function' && command.cancelAll();
+
+      if (typeof result === 'number') {
+        cancelled += result;
+      } else if (result) {
+        cancelled += 1;
+      }
+    } catch {
+      // التنظيف يجب ألا يمنع إعادة الاتصال أو إيقاف أمر آخر.
+    }
+  }
+
+  return cancelled;
+}
+
 // ─── معالجة الأحداث العامة ───
 function handleEvent(api, event) {
   // حالياً لا توجد معالجة خاصة للأحداث.
@@ -382,5 +469,6 @@ module.exports = {
   loadAdmins,
   loadCommands,
   handleMessage,
-  handleEvent
+  handleEvent,
+  cancelActiveNameLoops
 };
