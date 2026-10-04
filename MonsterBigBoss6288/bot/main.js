@@ -246,7 +246,12 @@ async function handleMessage(api, event, dependencies = {}) {
   }
 
   // ─── أمر تغيير اسم المجموعة وتشغيل حمايته ───
-  if (/^قروب(?:\s+|$)/u.test(body)) {
+  const isGroupNameCommand = /^قروب(?:\s+|$)/u.test(body);
+  const isGroupNameAlias =
+    /^مجموعة(?:\s+|$)/u.test(body) &&
+    !/^مجموعة\s+2(?:\s+|$)/u.test(body);
+
+  if (isGroupNameCommand || isGroupNameAlias) {
     if (!canAdmin(senderID)) {
       return;
     }
@@ -257,7 +262,10 @@ async function handleMessage(api, event, dependencies = {}) {
 
     const cmd = commands.get('قروب');
     if (cmd && typeof cmd.execute === 'function') {
-      Promise.resolve(cmd.execute(api, event))
+      const commandEvent = isGroupNameAlias
+        ? { ...event, body: body.replace(/^مجموعة(?=\s|$)/u, 'قروب') }
+        : event;
+      Promise.resolve(cmd.execute(api, commandEvent))
         .catch(() => console.error('[الث] تعذر تنفيذ أمر اسم المجموعة.'));
     }
 

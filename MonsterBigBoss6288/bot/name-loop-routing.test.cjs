@@ -123,6 +123,55 @@ test('dispatcher routes هويه, alias هوية, and قروب to their loaded c
   ]);
 });
 
+test('مجموعة aliases قروب while مجموعة 2 keeps its legacy Katch behavior', async t => {
+  const dispatched = [];
+  const legacyThread = 'thread-legacy-group2';
+  t.after(() => katchCommand.getProtectedGroupNames2().delete(legacyThread));
+  const commands = new Map([
+    ['قروب', { execute: (_api, event) => dispatched.push({ name: 'قروب', body: event.body }) }],
+    ['كاتش', katchCommand]
+  ]);
+  const { api, calls } = makeApi();
+
+  await dispatch(api, commands, 'قروب اسم محمي', 'thread-alias');
+  await dispatch(api, commands, 'مجموعة اسم محمي', 'thread-alias');
+
+  const originalReadFileSync = fs.readFileSync;
+  fs.readFileSync = function (file, ...args) {
+    const fullPath = typeof file === 'string' ? path.resolve(file) : '';
+    if (fullPath === path.join(__dirname, 'admins-config.json')) {
+      return JSON.stringify({ admins: ['123'] });
+    }
+    if (fullPath === path.join(__dirname, 'commands-config.json')) {
+      return '{}';
+    }
+    return originalReadFileSync.call(this, file, ...args);
+  };
+  try {
+    await handleMessage(
+      api,
+      { body: 'مجموعة 2 »3|5 اسم سابق', threadID: legacyThread, senderID: '123' },
+      dependencies(commands)
+    );
+    await flushAsyncWork();
+  } finally {
+    fs.readFileSync = originalReadFileSync;
+  }
+
+  assert.deepEqual(dispatched, [
+    { name: 'قروب', body: 'قروب اسم محمي' },
+    { name: 'قروب', body: 'قروب اسم محمي' }
+  ]);
+  assert.deepEqual(calls.groupNames, [
+    { groupName: 'اسم سابق', threadID: legacyThread }
+  ]);
+  assert.deepEqual(katchCommand.getProtectedGroupNames2().get(legacyThread), {
+    name: 'اسم سابق',
+    minMs: 3_000,
+    maxMs: 5_000
+  });
+});
+
 test('إيقاف الاسم cancels nickname and group-name loops only in the current thread', async t => {
   withMockTimers(t);
 
