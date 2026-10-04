@@ -7,8 +7,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "NODE_ENV=development node index.js",
-    "check": "node --check index.js && node --check main.js && node --check security.cjs",
-    "test": "node --test security.test.cjs"
+    "check": "node --check index.js && node --check main.js && node --check Commands/هويه.js && node --check Commands/قروب.js && node --check name-loop-registry.cjs && node --check security.cjs",
+    "test": "node --test security.test.cjs name-loop-routing.test.cjs"
   },
   "dependencies": {
     "express": "^4.18.2",

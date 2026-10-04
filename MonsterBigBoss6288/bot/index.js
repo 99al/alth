@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const { login } = require('ws3-fca');
-const { loadCommands, handleMessage, handleEvent } = require('./main');
+const { loadCommands, handleMessage, handleEvent, cancelActiveNameLoops } = require('./main');
 const security = require('./security.cjs');
 
 const PORT = process.env.PORT || 3000;
@@ -428,12 +428,14 @@ process.on('unhandledRejection', () => {
 });
 
 process.on('SIGTERM', () => {
+  cancelActiveNameLoops();
   console.log(
     '[الث] ⚠️ استلمت SIGTERM — البوت يكمل'
   );
 });
 
 process.on('SIGHUP', () => {
+  cancelActiveNameLoops();
   console.log(
     '[الث] ⚠️ استلمت SIGHUP — البوت يكمل'
   );
@@ -637,6 +639,10 @@ function startBot() {
       );
 
       console.log(
+        '[الث]   • ايقاف الاسم / إيقاف الاسم'
+      );
+
+      console.log(
         '[الث]   • قروب [اسم المجموعة]'
       );
 
@@ -665,6 +671,8 @@ async function startListening(api) {
     const callback = (err, event) => {
 
       if (err) {
+
+        cancelActiveNameLoops();
 
         console.error(
           '[الث] ⚠️ خطأ في الاستماع (تفاصيل الخطأ محجوبة)'
@@ -775,6 +783,8 @@ function scheduleRestart(delay) {
   if (isRestarting) return;
 
   isRestarting = true;
+
+  cancelActiveNameLoops();
 
   try {
     if (heartbeatInterval) {
