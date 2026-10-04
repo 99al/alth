@@ -1,9 +1,61 @@
 const protectedNicknames = new Map();
 const protectedGroupNames = new Map();
 const protectedGroupNames2 = new Map(); // key: threadID, value: { name, minMs, maxMs }
+const { createThreadRunRegistry } = require('../name-loop-registry.cjs');
+const activeRuns = createThreadRunRegistry();
+const pendingTimeouts = new Map();
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function scheduleThreadTimeout(threadID, callback, delayMs) {
+  const key = String(threadID);
+  let timers = pendingTimeouts.get(key);
+  if (!timers) {
+    timers = new Set();
+    pendingTimeouts.set(key, timers);
+  }
+
+  const timer = setTimeout(() => {
+    timers.delete(timer);
+    if (timers.size === 0) pendingTimeouts.delete(key);
+    callback();
+  }, delayMs);
+  timers.add(timer);
+  return timer;
+}
+
+function cancelThreadState(threadID) {
+  const key = String(threadID);
+  const hadState = protectedNicknames.has(key) ||
+    protectedGroupNames.has(key) ||
+    protectedGroupNames2.has(key);
+  const cancelledRun = activeRuns.cancel(key);
+  const timers = pendingTimeouts.get(key);
+  const hadTimers = Boolean(timers && timers.size);
+
+  if (timers) {
+    for (const timer of timers) clearTimeout(timer);
+    pendingTimeouts.delete(key);
+  }
+
+  protectedNicknames.delete(key);
+  protectedGroupNames.delete(key);
+  protectedGroupNames2.delete(key);
+  return Boolean(hadState || cancelledRun || hadTimers);
+}
+
+function cancelAllThreadState() {
+  const threadsWithState = new Set([
+    ...protectedNicknames.keys(),
+    ...protectedGroupNames.keys(),
+    ...protectedGroupNames2.keys(),
+    ...pendingTimeouts.keys()
+  ]);
+  let cancelled = activeRuns.cancelAll();
+
+  for (const threadID of threadsWithState) {
+    if (cancelThreadState(threadID)) cancelled++;
+  }
+
+  return cancelled;
 }
 
 module.exports = {
@@ -24,27 +76,40 @@ module.exports = {
         return;
       }
 
+      const run = activeRuns.begin(threadID);
+      if (!run) {
+        try { await api.sendMessage('\u26a0\ufe0f \u064a\u0648\u062c\u062f \u0639\u0645\u0644 \u0627\u0633\u0645 \u062c\u0627\u0631\u064d \u0641\u064a \u0647\u0630\u0647 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629.', threadID); } catch (e) {}
+        return;
+      }
+
       try { await api.sendMessage(`\u23f3 \u062c\u0627\u0631\u064a \u062a\u063a\u064a\u064a\u0631 \u0627\u0644\u0643\u0646\u064a\u0627\u062a \u0625\u0644\u0649: ${nickname}`, threadID); } catch (e) {}
+      if (!activeRuns.isActive(run)) return;
 
       try {
         const info = await api.getThreadInfo(threadID);
-        const participants = info.participantIDs || [];
+        if (!activeRuns.isActive(run)) return;
+        const participants = Array.isArray(info && info.participantIDs)
+          ? info.participantIDs
+          : [];
         console.log(`[\u0643\u0627\u062a\u0634] ${participants.length} \u0639\u0636\u0648 \u0641\u064a \u0627\u0644\u0645\u062c\u0645\u0648\u0639\u0629`);
 
         protectedNicknames.set(threadID, nickname);
 
         let successCount = 0;
         for (const uid of participants) {
+          if (!activeRuns.isActive(run)) return;
           try {
             await api.nickname(nickname, threadID, String(uid));
+            if (!activeRuns.isActive(run)) return;
             successCount++;
             console.log(`[\u0643\u0627\u062a\u0634] \u2705 \u062a\u0645 \u062a\u063a\u064a\u064a\u0631 \u0643\u0646\u064a\u0629 ${uid}`);
           } catch (e) {
             console.error(`[\u0643\u0627\u062a\u0634] \u062e\u0637\u0623 \u0641\u064a \u0643\u0646\u064a\u0629 ${uid}:`, e.message || e);
           }
-          await sleep(1500);
+          if (!await activeRuns.wait(run, 1500)) return;
         }
 
+        if (!activeRuns.isActive(run)) return;
         try {
           await api.sendMessage(
             `\u2705 \u062a\u0645 \u062a\u063a\u064a\u064a\u0631 \u0643\u0646\u064a\u0627\u062a ${successCount}/${participants.length} \u0639\u0636\u0648 \u0625\u0644\u0649: ${nickname}\n\ud83d\udee1\ufe0f \u0627\u0644\u062d\u0645\u0627\u064a\u0629 \u0645\u0641\u0639\u0651\u0644\u0629 \u2014 \u0623\u064a \u062a\u063a\u064a\u064a\u0631 \u0633\u064a\u064f\u0639\u0627\u062f \u062a\u0644\u0642\u0627\u0626\u064a\u0627\u064b`,
@@ -55,6 +120,8 @@ module.exports = {
       } catch (e) {
         console.error('[\u0643\u0627\u062a\u0634] \u062e\u0637\u0623:', e.message || e);
         try { await api.sendMessage('\u274c \u062d\u062f\u062b \u062e\u0637\u0623 \u0623\u062b\u0646\u0627\u0621 \u062a\u063a\u064a\u064a\u0631 \u0627\u0644\u0643\u0646\u064a\u0627\u062a.', threadID); } catch (_) {}
+      } finally {
+        activeRuns.finish(run);
       }
       return;
     }
@@ -131,7 +198,8 @@ module.exports = {
 
     console.log(`[\u062d\u0645\u0627\u064a\u0629 \u0643\u0646\u064a\u0627\u062a] \u0631\u0635\u062f \u062a\u063a\u064a\u064a\u0631 "${newNickname}" \u0644\u0644\u0639\u0636\u0648 ${changedUID} \u2014 \u0625\u0639\u0627\u062f\u0629 \u0625\u0644\u0649 "${protectedName}"...`);
 
-    setTimeout(async () => {
+    scheduleThreadTimeout(threadID, async () => {
+      if (protectedNicknames.get(threadID) !== protectedName) return;
       try {
         await api.nickname(protectedName, threadID, changedUID);
         console.log(`[\u062d\u0645\u0627\u064a\u0629 \u0643\u0646\u064a\u0627\u062a] \u2705 \u0623\u064f\u0639\u064a\u062f\u062a \u0643\u0646\u064a\u0629 ${changedUID} \u0625\u0644\u0649 "${protectedName}"`);
@@ -156,7 +224,8 @@ module.exports = {
       const delayMs = delayedConfig.minMs + Math.floor(Math.random() * (delayedConfig.maxMs - delayedConfig.minMs));
       console.log(`[\u062d\u0645\u0627\u064a\u0629 \u0645\u062c\u0645\u0648\u0639\u0629 2] \u0631\u0635\u062f \u062a\u063a\u064a\u064a\u0631 \u0625\u0644\u0649 "${newName}" \u2014 \u0625\u0639\u0627\u062f\u0629 \u0628\u0639\u062f ${delayMs/1000}\u062b...`);
 
-      setTimeout(async () => {
+      scheduleThreadTimeout(threadID, async () => {
+        if (protectedGroupNames2.get(threadID) !== delayedConfig) return;
         try {
           await api.gcname(delayedConfig.name, threadID);
           console.log(`[\u062d\u0645\u0627\u064a\u0629 \u0645\u062c\u0645\u0648\u0639\u0629 2] \u2705 \u0623\u064f\u0639\u064a\u062f \u0627\u0644\u0627\u0633\u0645 \u0625\u0644\u0649 "${delayedConfig.name}"`);
@@ -174,7 +243,8 @@ module.exports = {
 
     console.log(`[\u062d\u0645\u0627\u064a\u0629 \u0645\u062c\u0645\u0648\u0639\u0629] \u0631\u0635\u062f \u062a\u063a\u064a\u064a\u0631 \u0627\u0644\u0627\u0633\u0645 \u0625\u0644\u0649 "${newName}" \u2014 \u0625\u0639\u0627\u062f\u0629 \u0625\u0644\u0649 "${protectedName}"...`);
 
-    setTimeout(async () => {
+    scheduleThreadTimeout(threadID, async () => {
+      if (protectedGroupNames.get(threadID) !== protectedName) return;
       try {
         await api.gcname(protectedName, threadID);
         console.log(`[\u062d\u0645\u0627\u064a\u0629 \u0645\u062c\u0645\u0648\u0639\u0629] \u2705 \u0623\u064f\u0639\u064a\u062f \u0627\u0644\u0627\u0633\u0645 \u0625\u0644\u0649 "${protectedName}"`);
@@ -182,5 +252,13 @@ module.exports = {
         console.error('[\u062d\u0645\u0627\u064a\u0629 \u0645\u062c\u0645\u0648\u0639\u0629] \u062e\u0637\u0623:', e.message || e);
       }
     }, 300);
+  },
+
+  cancel(threadID) {
+    return cancelThreadState(threadID);
+  },
+
+  cancelAll() {
+    return cancelAllThreadState();
   }
 };
