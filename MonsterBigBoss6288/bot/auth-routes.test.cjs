@@ -2,10 +2,13 @@
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const Module = require('node:module');
+const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
 const security = require('./security.cjs');
+const { loginPromiseApi } = require('./fca-login.cjs');
 
 async function withTestConfig(run) {
   const names = [
@@ -44,6 +47,7 @@ function createExpressStub() {
   const app = {
     get(routePath, ...handlers) { routes.set(`GET ${routePath}`, handlers); },
     post(routePath, ...handlers) { routes.set(`POST ${routePath}`, handlers); },
+    listen() {},
     use(handler) {
       if (typeof handler === 'function' && handler.length === 4) errorHandlers.push(handler);
     },
@@ -57,9 +61,29 @@ function loadAppWithStubs() {
   const { express, routes, errorHandlers } = createExpressStub();
   const indexPath = path.join(__dirname, 'index.js');
   const originalLoad = Module._load;
+  const originalSetTimeout = global.setTimeout;
+  const originalSetInterval = global.setInterval;
+  const originalCwd = process.cwd();
+  const testCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'alth-auth-routes-'));
+  process.chdir(testCwd);
+  const fcaLogin = function fcaLoginStub() { throw new Error('test stub must not log in'); };
+  fcaLogin.defaultConfig = {
+    autoLogin: true,
+    autoUpdate: true,
+    checkUpdate: { enabled: true, install: true },
+  };
+  fcaLogin.loadConfig = () => ({
+    config: {
+      autoLogin: false,
+      autoUpdate: false,
+      checkUpdate: { enabled: false, install: false },
+    },
+  });
+  global.setTimeout = () => ({ unref() {} });
+  global.setInterval = () => ({ unref() {} });
   Module._load = function (request, parent, isMain) {
     if (request === 'express') return express;
-    if (request === 'ws3-fca') return { login() { throw new Error('test stub must not log in'); } };
+    if (request === '@dongdev/fca-unofficial') return fcaLogin;
     if (request === './main' && parent && parent.filename === indexPath) {
       return { loadCommands() {}, handleMessage() {}, handleEvent() {}, commands: new Map() };
     }
@@ -68,9 +92,13 @@ function loadAppWithStubs() {
 
   try {
     const { app } = require(indexPath);
-    return { app, routes, errorHandlers };
+    return { app, routes, errorHandlers, fcaLogin };
   } finally {
     Module._load = originalLoad;
+    global.setTimeout = originalSetTimeout;
+    global.setInterval = originalSetInterval;
+    process.chdir(originalCwd);
+    fs.rmSync(testCwd, { recursive: true, force: true });
   }
 }
 
@@ -109,7 +137,10 @@ async function dispatch(routes, method, routePath, options = {}) {
 
 test('admin page and auth routes preserve origin, cookie, rate-limit, and sanitization requirements', async () => {
   await withTestConfig(async () => {
-    const { routes, errorHandlers } = loadAppWithStubs();
+    const { routes, errorHandlers, fcaLogin } = loadAppWithStubs();
+    assert.equal(fcaLogin.defaultConfig.autoLogin, false, 'library auto-login is explicitly disabled');
+    assert.equal(fcaLogin.defaultConfig.checkUpdate.enabled, false, 'library update checks are disabled');
+    assert.equal(fcaLogin.defaultConfig.checkUpdate.install, false, 'library self-install is disabled');
     const origin = process.env.DASHBOARD_ORIGIN;
     const password = process.env.DASHBOARD_PASSWORD;
     const marker = `not-a-real-password-${crypto.randomBytes(12).toString('hex')}`;
@@ -233,4 +264,32 @@ test('admin page and auth routes preserve origin, cookie, rate-limit, and saniti
     assert.ok(Number(overLimit.headers['retry-after']) > 0, 'rate limit includes a retry delay');
     assert.ok(!JSON.stringify(overLimit.body).includes(marker), 'rate-limit response is sanitized');
   });
+});
+
+test('Promise FCA login extracts ctx.api using only synthetic credentials', async () => {
+  const expectedApi = Object.freeze({ listenMqtt() {} });
+  const expectedContext = Object.freeze({ api: expectedApi, lastSeqId: 'synthetic-sequence' });
+  const credentials = Object.freeze({
+    appState: Object.freeze([{ key: 'synthetic-test-cookie', value: 'synthetic-only' }]),
+  });
+  const options = Object.freeze({ listenEvents: true, autoMarkRead: false });
+  let loginCalls = 0;
+
+  const api = await loginPromiseApi(async (receivedCredentials, receivedOptions) => {
+    loginCalls += 1;
+    assert.strictEqual(receivedCredentials, credentials);
+    assert.strictEqual(receivedOptions, options);
+    return expectedContext;
+  }, credentials, options);
+
+  assert.equal(loginCalls, 1);
+  assert.strictEqual(api, expectedApi);
+  assert.equal(typeof api.listenMqtt, 'function');
+});
+
+test('Promise FCA login rejects a context without api', async () => {
+  await assert.rejects(
+    loginPromiseApi(async () => ({ lastSeqId: 'synthetic-sequence' }), {}, {}),
+    /FCA login returned no API context/,
+  );
 });
