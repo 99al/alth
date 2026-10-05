@@ -49,6 +49,15 @@ function withTestConfig(run) {
   }
 }
 
+function createPrivateCachePath() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'alth-appstate-cache-test-'));
+  fs.chmodSync(directory, 0o700);
+  return {
+    directory,
+    cachePath: path.join(directory, 'cache', 'appstate.json'),
+  };
+}
+
 test('configuration fails closed when required secrets are absent or too short', () => {
   withTestConfig(() => {
     delete process.env.DASHBOARD_PASSWORD;
@@ -106,19 +115,142 @@ test('APPSTATE_JSON parses only a non-empty array of session objects without ech
   }
 });
 
-test('Railway/production uses APPSTATE_JSON ahead of APPSTATE_PATH and requires the secret', () => {
+test('production seeds a private cache from APPSTATE_JSON and requires a source when the cache is empty', () => {
   const fixture = [{ name: 'synthetic-cookie', value: 'synthetic-only' }];
+  const cache = createPrivateCachePath();
   const env = {
     NODE_ENV: 'production',
     APPSTATE_JSON: JSON.stringify(fixture),
     APPSTATE_PATH: '/tmp/should-not-be-read.json',
   };
-  assert.equal(security.isProductionRuntime(env), true);
-  assert.deepEqual(security.loadAppstate(env), { appstate: fixture, source: 'environment' });
-  assert.throws(() => security.loadAppstate({ NODE_ENV: 'production', APPSTATE_PATH: '/tmp/not-read.json' }), /APPSTATE_JSON is required/);
-  assert.equal(security.isProductionRuntime({ NODE_ENV: 'development', RAILWAY_ENVIRONMENT: 'staging' }), true);
-  assert.equal(security.isProductionRuntime({ NODE_ENV: 'staging' }), true);
-  assert.equal(security.isProductionRuntime({}), true);
+  try {
+    assert.equal(security.isProductionRuntime(env), true);
+    assert.deepEqual(security.loadAppstate(env, { cachePath: cache.cachePath }), {
+      appstate: fixture,
+      source: 'environment',
+    });
+    assert.throws(() => security.loadAppstate({
+      NODE_ENV: 'production',
+      APPSTATE_PATH: '/tmp/not-read.json',
+    }, { cachePath: path.join(cache.directory, 'empty-cache', 'appstate.json') }), /APPSTATE_JSON is required/);
+    assert.equal(security.isProductionRuntime({ NODE_ENV: 'development', RAILWAY_ENVIRONMENT: 'staging' }), true);
+    assert.equal(security.isProductionRuntime({ NODE_ENV: 'staging' }), true);
+    assert.equal(security.isProductionRuntime({}), true);
+  } finally {
+    fs.rmSync(cache.directory, { recursive: true, force: true });
+  }
+});
+
+test('production reuses snapshots only for the same seed and switches to changed APPSTATE_JSON', () => {
+  const initial = [{ name: 'synthetic-cookie', value: 'initial-only' }];
+  const changedEnvironment = [{ name: 'synthetic-cookie', value: 'environment-only' }];
+  const snapshot = [{ name: 'synthetic-cookie', value: 'snapshot-only' }];
+  const cache = createPrivateCachePath();
+  const env = {
+    NODE_ENV: 'production',
+    RAILWAY_ENVIRONMENT: 'production',
+    APPSTATE_JSON: JSON.stringify(initial),
+  };
+
+  try {
+    assert.deepEqual(security.loadAppstate(env, { cachePath: cache.cachePath }), {
+      appstate: initial,
+      source: 'environment',
+    });
+    assert.equal(fs.statSync(path.dirname(cache.cachePath)).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(cache.cachePath).mode & 0o777, 0o600);
+
+    const cacheRecord = JSON.parse(fs.readFileSync(cache.cachePath, 'utf8'));
+    assert.deepEqual(Object.keys(cacheRecord).sort(), ['appstate', 'seedFingerprint', 'version']);
+    assert.equal(cacheRecord.version, 1);
+    assert.match(cacheRecord.seedFingerprint, /^[a-f0-9]{64}$/);
+    assert.equal(cacheRecord.seedFingerprint, crypto.createHash('sha256').update(env.APPSTATE_JSON, 'utf8').digest('hex'));
+    assert.notEqual(cacheRecord.seedFingerprint, env.APPSTATE_JSON);
+
+    assert.equal(security.canPersistAppstate(env), true);
+    assert.equal(security.persistAppstate(snapshot, env, { cachePath: cache.cachePath }), true);
+    assert.deepEqual(security.loadAppstate({ ...env }, { cachePath: cache.cachePath }), {
+      appstate: snapshot,
+      source: 'cache',
+    });
+    assert.equal(fs.statSync(cache.cachePath).mode & 0o777, 0o600);
+
+    assert.deepEqual(security.loadAppstate({
+      ...env,
+      APPSTATE_JSON: JSON.stringify(changedEnvironment),
+    }, { cachePath: cache.cachePath }), {
+      appstate: changedEnvironment,
+      source: 'environment',
+    });
+    assert.deepEqual(security.loadAppstate({
+      ...env,
+      APPSTATE_JSON: JSON.stringify(changedEnvironment),
+    }, { cachePath: cache.cachePath }), {
+      appstate: changedEnvironment,
+      source: 'cache',
+    });
+  } finally {
+    fs.rmSync(cache.directory, { recursive: true, force: true });
+  }
+});
+
+test('missing APPSTATE_JSON fails without logging or leaking cached session values', () => {
+  const fixture = [{ name: 'synthetic-cookie', value: 'no-session-leak-marker' }];
+  const cache = createPrivateCachePath();
+  const env = {
+    NODE_ENV: 'production',
+    RAILWAY_ENVIRONMENT: 'production',
+    APPSTATE_JSON: JSON.stringify(fixture),
+  };
+  const logs = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+
+  try {
+    security.loadAppstate(env, { cachePath: cache.cachePath });
+    console.log = (...args) => logs.push(args.join(' '));
+    console.error = (...args) => logs.push(args.join(' '));
+    assert.throws(() => security.loadAppstate({
+      NODE_ENV: 'production',
+      RAILWAY_ENVIRONMENT: 'production',
+    }, { cachePath: cache.cachePath }), error => {
+      assert.match(error.message, /APPSTATE_JSON is required/);
+      assert.equal(error.message.includes('no-session-leak-marker'), false);
+      return true;
+    });
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+    fs.rmSync(cache.directory, { recursive: true, force: true });
+  }
+
+  assert.deepEqual(logs, []);
+});
+
+test('an invalid private cache falls back to APPSTATE_JSON and is reseeded without exposing its contents', () => {
+  const fixture = [{ name: 'synthetic-cookie', value: 'environment-only' }];
+  const cache = createPrivateCachePath();
+  const directory = path.dirname(cache.cachePath);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(cache.cachePath, '{"invalid":"synthetic-only"}', { mode: 0o600 });
+  const env = {
+    NODE_ENV: 'production',
+    RAILWAY_ENVIRONMENT: 'production',
+    APPSTATE_JSON: JSON.stringify(fixture),
+  };
+
+  try {
+    assert.deepEqual(security.loadAppstate(env, { cachePath: cache.cachePath }), {
+      appstate: fixture,
+      source: 'environment',
+    });
+    assert.deepEqual(security.loadAppstate(env, { cachePath: cache.cachePath }), {
+      appstate: fixture,
+      source: 'cache',
+    });
+  } finally {
+    fs.rmSync(cache.directory, { recursive: true, force: true });
+  }
 });
 
 test('local APPSTATE_PATH is a development-only file fallback', () => {
