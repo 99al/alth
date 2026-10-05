@@ -234,6 +234,15 @@ function isProductionRuntime(env = process.env) {
   return hasRailwayIdentity || !isExplicitlyLocal;
 }
 
+function isAppstateArray(value) {
+  return Array.isArray(value) && value.length > 0 &&
+    !value.some(item => item === null || typeof item !== 'object' || Array.isArray(item));
+}
+
+function fingerprintAppstateSeed(raw) {
+  return crypto.createHash('sha256').update(raw, 'utf8').digest('hex');
+}
+
 function parseAppstateJson(raw, settingName = 'APPSTATE_JSON') {
   if (typeof raw !== 'string' || raw.trim() === '') {
     throw new Error(`${settingName} must contain a non-empty JSON session array`);
@@ -246,8 +255,7 @@ function parseAppstateJson(raw, settingName = 'APPSTATE_JSON') {
     throw new Error(`${settingName} must contain valid JSON`);
   }
 
-  if (!Array.isArray(parsed) || parsed.length === 0 ||
-      parsed.some(item => item === null || typeof item !== 'object' || Array.isArray(item))) {
+  if (!isAppstateArray(parsed)) {
     throw new Error(`${settingName} must be a non-empty array of session objects`);
   }
   return parsed;
@@ -278,13 +286,31 @@ function resolveAppstatePath(env = process.env) {
   return target;
 }
 
-function loadAppstate(env = process.env) {
-  if (Object.prototype.hasOwnProperty.call(env, 'APPSTATE_JSON')) {
-    return { appstate: parseAppstateJson(env.APPSTATE_JSON), source: 'environment' };
+function loadAppstate(env = process.env, options = {}) {
+  if (isProductionRuntime(env)) {
+    if (!Object.prototype.hasOwnProperty.call(env, 'APPSTATE_JSON')) {
+      throw new Error('APPSTATE_JSON is required in Railway/production; configure it and redeploy');
+    }
+
+    const seed = env.APPSTATE_JSON;
+    const appstate = parseAppstateJson(seed);
+    const seedFingerprint = fingerprintAppstateSeed(seed);
+    const cachePath = (options && options.cachePath) || getAppstateCachePath();
+    const cached = readPrivateAppstateCache(cachePath);
+    if (cached && cached.seedFingerprint === seedFingerprint) {
+      return { appstate: cached.appstate, source: 'cache' };
+    }
+
+    try {
+      writePrivateAppstateCache(appstate, cachePath, seedFingerprint);
+    } catch {
+      // The environment remains usable if this ephemeral cache is unavailable.
+    }
+    return { appstate, source: 'environment' };
   }
 
-  if (isProductionRuntime(env)) {
-    throw new Error('APPSTATE_JSON is required in Railway/production; configure it and redeploy');
+  if (Object.prototype.hasOwnProperty.call(env, 'APPSTATE_JSON')) {
+    return { appstate: parseAppstateJson(env.APPSTATE_JSON), source: 'environment' };
   }
 
   const filePath = resolveAppstatePath(env);
@@ -301,6 +327,10 @@ function canWriteAppstate(env = process.env) {
   return !isProductionRuntime(env) &&
     !Object.prototype.hasOwnProperty.call(env, 'APPSTATE_JSON') &&
     typeof env.APPSTATE_PATH === 'string' && env.APPSTATE_PATH.trim() !== '';
+}
+
+function canPersistAppstate(env = process.env) {
+  return isProductionRuntime(env) || canWriteAppstate(env);
 }
 
 function appstateUpdateConflictMessage(env = process.env) {
@@ -368,6 +398,113 @@ function writeAppstate(value) {
   writeJsonAtomicPrivate(resolveAppstatePath(), value);
 }
 
+function getAppstateCachePath() {
+  const temporaryRoot = fs.realpathSync.native(os.tmpdir());
+  const directory = path.join(temporaryRoot, 'alth-appstate-cache');
+  const repositoryRoot = fs.realpathSync.native(path.resolve(__dirname, '..'));
+  if (isPathWithin(directory, repositoryRoot) || isPathWithin(repositoryRoot, directory)) {
+    throw new Error('Appstate cache must remain outside the source repository');
+  }
+  return path.join(directory, 'appstate.json');
+}
+
+function resolvePrivateAppstateCachePath(filePath) {
+  const target = path.resolve(filePath);
+  const directory = path.dirname(target);
+  const canonicalDirectory = canonicalizePathAllowMissing(directory);
+  const repositoryRoot = fs.realpathSync.native(path.resolve(__dirname, '..'));
+  if (canonicalDirectory !== directory ||
+      isPathWithin(target, repositoryRoot) || isPathWithin(repositoryRoot, target)) {
+    throw new Error('Appstate cache path is not private and external to the source repository');
+  }
+  return target;
+}
+
+function readPrivateAppstateCache(filePath) {
+  try {
+    const target = resolvePrivateAppstateCachePath(filePath);
+    const directory = path.dirname(target);
+    const directoryStat = fs.lstatSync(directory);
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink() ||
+        (directoryStat.mode & 0o777) !== 0o700 ||
+        fs.realpathSync.native(directory) !== directory) {
+      return null;
+    }
+
+    const fileStat = fs.lstatSync(target);
+    if (!fileStat.isFile() || fileStat.isSymbolicLink() ||
+        (fileStat.mode & 0o777) !== 0o600) {
+      return null;
+    }
+
+    const cached = JSON.parse(fs.readFileSync(target, 'utf8'));
+    if (!cached || typeof cached !== 'object' || Array.isArray(cached) ||
+        cached.version !== 1 ||
+        typeof cached.seedFingerprint !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(cached.seedFingerprint) ||
+        !isAppstateArray(cached.appstate)) {
+      return null;
+    }
+    return cached;
+  } catch {
+    return null;
+  }
+}
+
+function writePrivateAppstateCache(value, filePath, seedFingerprint) {
+  if (!isAppstateArray(value)) {
+    throw new Error('Appstate must be a non-empty array of session objects');
+  }
+  if (typeof seedFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(seedFingerprint)) {
+    throw new Error('Appstate cache seed fingerprint is invalid');
+  }
+
+  const target = resolvePrivateAppstateCachePath(filePath);
+  const directory = path.dirname(target);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const directoryStat = fs.lstatSync(directory);
+  if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+    throw new Error('Appstate cache directory must be a real directory');
+  }
+  fs.chmodSync(directory, 0o700);
+  if (fs.realpathSync.native(directory) !== directory) {
+    throw new Error('Appstate cache directory must not contain symbolic links');
+  }
+
+  writeJsonAtomicPrivate(target, {
+    version: 1,
+    seedFingerprint,
+    appstate: value,
+  });
+}
+
+function persistAppstate(value, env = process.env, options = {}) {
+  if (isProductionRuntime(env)) {
+    if (!Object.prototype.hasOwnProperty.call(env, 'APPSTATE_JSON')) {
+      throw new Error('APPSTATE_JSON is required in Railway/production; configure it and redeploy');
+    }
+    const seed = env.APPSTATE_JSON;
+    parseAppstateJson(seed);
+    const seedFingerprint = fingerprintAppstateSeed(seed);
+    const cachePath = (options && options.cachePath) || getAppstateCachePath();
+    writePrivateAppstateCache(value, cachePath, seedFingerprint);
+    return true;
+  }
+
+  if (!canWriteAppstate(env)) return false;
+  if (env === process.env) {
+    writeAppstate(value);
+    return true;
+  }
+
+  if (!Array.isArray(value) || value.length === 0 ||
+      value.some(item => item === null || typeof item !== 'object' || Array.isArray(item))) {
+    throw new Error('Appstate must be a non-empty array of session objects');
+  }
+  writeJsonAtomicPrivate(resolveAppstatePath(env), value);
+  return true;
+}
+
 module.exports = {
   SESSION_COOKIE_NAME,
   SESSION_TTL_SECONDS,
@@ -386,8 +523,10 @@ module.exports = {
   parseAppstateJson,
   loadAppstate,
   canWriteAppstate,
+  canPersistAppstate,
   appstateUpdateConflictMessage,
   resolveAppstatePath,
   writeJsonAtomicPrivate,
   writeAppstate,
+  persistAppstate,
 };

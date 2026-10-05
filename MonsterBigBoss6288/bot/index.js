@@ -362,7 +362,7 @@ function startMemorySweeper(api) {
 
 function saveAppstate(api, reason) {
   try {
-    if (!security.canWriteAppstate()) return;
+    if (!security.canPersistAppstate()) return;
 
     if (
       !api ||
@@ -374,7 +374,7 @@ function saveAppstate(api, reason) {
     const state = api.getAppState();
 
     if (state && state.length > 0) {
-      security.writeAppstate(state);
+      security.persistAppstate(state);
 
       if (reason) {
         console.log(
@@ -390,7 +390,7 @@ function saveAppstate(api, reason) {
 }
 
 function startAppstateSaver(api) {
-  if (!security.canWriteAppstate()) return;
+  if (!security.canPersistAppstate()) return;
 
   if (appstateSaverInterval) {
     clearInterval(appstateSaverInterval);
@@ -554,7 +554,7 @@ function startBot() {
         status: 'متصل ويعمل'
       });
 
-      if (security.canWriteAppstate()) try {
+      if (security.canPersistAppstate()) try {
         if (
           typeof api.getAppState ===
           'function'
@@ -566,11 +566,11 @@ function startBot() {
             state &&
             state.length > 0
           ) {
-            security.writeAppstate(state);
+            security.persistAppstate(state);
           }
         }
 
-        console.log('[الث] 💾 تم تحديث جلسة التطوير المحلية');
+        console.log('[الث] 💾 تم تحديث نسخة الجلسة المحلية');
       } catch (e) {}
 
       const ctx = api.ctx;
