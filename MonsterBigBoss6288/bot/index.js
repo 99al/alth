@@ -1,9 +1,109 @@
 const fs = require('fs');
 const path = require('path');
-const express = require('express');
-const { login } = require('ws3-fca');
-const { loadCommands, handleMessage, handleEvent, cancelActiveNameLoops } = require('./main');
 const security = require('./security.cjs');
+const { loginPromiseApi } = require('./fca-login.cjs');
+
+function prepareFcaRuntimeConfig() {
+  const configPath = path.join(process.cwd(), 'fca-config.json');
+  let config;
+  let configExists = true;
+
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      config = {};
+      configExists = false;
+    } else {
+      throw new Error('Unable to safely read FCA runtime configuration');
+    }
+  }
+
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error('Invalid FCA runtime configuration');
+  }
+
+  const checkUpdate =
+    config.checkUpdate && typeof config.checkUpdate === 'object' && !Array.isArray(config.checkUpdate)
+      ? config.checkUpdate
+      : {};
+  const requiresWrite =
+    !configExists ||
+    config.autoLogin !== false ||
+    config.autoUpdate !== false ||
+    checkUpdate.enabled !== false ||
+    checkUpdate.install !== false;
+
+  config.autoLogin = false;
+  config.autoUpdate = false;
+  config.checkUpdate = {
+    ...checkUpdate,
+    enabled: false,
+    install: false,
+  };
+
+  if (requiresWrite) {
+    try {
+      security.writeJsonAtomicPrivate(configPath, config);
+    } catch {
+      throw new Error('Unable to persist safe FCA runtime settings');
+    }
+  }
+}
+
+prepareFcaRuntimeConfig();
+
+const express = require('express');
+const login = require('@dongdev/fca-unofficial');
+const { loadCommands, handleMessage, handleEvent, cancelActiveNameLoops } = require('./main');
+
+function verifyFcaRuntime() {
+  if (
+    typeof login !== 'function' ||
+    !login.defaultConfig ||
+    typeof login.defaultConfig !== 'object' ||
+    !login.defaultConfig.checkUpdate ||
+    typeof login.defaultConfig.checkUpdate !== 'object' ||
+    typeof login.loadConfig !== 'function'
+  ) {
+    throw new Error('Incompatible @dongdev/fca-unofficial CommonJS API');
+  }
+
+  login.defaultConfig.autoLogin = false;
+  login.defaultConfig.autoUpdate = false;
+  login.defaultConfig.checkUpdate.enabled = false;
+  login.defaultConfig.checkUpdate.install = false;
+  const loadedConfig = login.loadConfig();
+  const config = loadedConfig && loadedConfig.config;
+  if (
+    !config ||
+    typeof config !== 'object' ||
+    Array.isArray(config) ||
+    !config.checkUpdate ||
+    typeof config.checkUpdate !== 'object' ||
+    Array.isArray(config.checkUpdate)
+  ) {
+    throw new Error('Unable to verify FCA runtime settings');
+  }
+
+  const cachedConfig = global.fca && global.fca.config;
+  if (
+    config.autoLogin !== false ||
+    config.autoUpdate !== false ||
+    config.checkUpdate.enabled !== false ||
+    config.checkUpdate.install !== false ||
+    (cachedConfig && (
+      cachedConfig.autoLogin !== false ||
+      cachedConfig.autoUpdate !== false ||
+      cachedConfig.checkUpdate?.enabled !== false ||
+      cachedConfig.checkUpdate?.install !== false
+    ))
+  ) {
+    throw new Error('FCA runtime settings were not applied before module initialization');
+  }
+}
+
+verifyFcaRuntime();
 
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -461,20 +561,19 @@ function startBot() {
     '[الث] 🚀 جاري تسجيل الدخول...'
   );
 
-  login(
-    {
-      appState: appstate
-    },
-    {
-      listenEvents: true,
-      selfListen: false,
-      autoMarkDelivery: false,
-      autoMarkRead: false,
-      forceLogin: false,
-      autoReconnect: true,
-      online: true
-    },
-    (err, api) => {
+  const loginOptions = {
+    listenEvents: true,
+    selfListen: false,
+    autoMarkRead: false,
+    forceLogin: false,
+    autoReconnect: true,
+    online: true
+  };
+
+  const handleLogin = (err, api) => {
+    if (!err && (!api || typeof api !== 'object')) {
+      err = new Error('FCA login returned no API context');
+    }
 
       if (err) {
         console.error(
@@ -573,20 +672,6 @@ function startBot() {
         console.log('[الث] 💾 تم تحديث نسخة الجلسة المحلية');
       } catch (e) {}
 
-      const ctx = api.ctx;
-
-      if (ctx && ctx.lastSeqId) {
-        ctx.firstListen = true;
-
-        console.log(
-          '[الث] 🔑 تم العثور على Sequence ID (القيمة محجوبة)'
-        );
-      } else {
-        console.log(
-          '[الث] ⚠️ لم يُعثر على irisSeqID'
-        );
-      }
-
       loadCommands();
 
       startListening(api);
@@ -661,8 +746,11 @@ function startBot() {
       console.log(
         '[الث] ─────────────────────────────────'
       );
-    }
-  );
+  };
+
+  loginPromiseApi(login, { appState: appstate }, loginOptions)
+    .then(api => handleLogin(null, api))
+    .catch(err => handleLogin(err, null));
 }
 
 async function startListening(api) {
