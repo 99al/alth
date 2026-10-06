@@ -47,8 +47,8 @@ test('nm authorization stays closed by default and accepts the supplied admin ch
   assert.deepEqual(calls.titles, [{ name: 'اسم تجريبي', threadID: 'thread-auth' }]);
   assert.deepEqual(command.getStatus('thread-auth'), {
     name: 'اسم تجريبي',
-    minMinutes: 1,
-    maxMinutes: 2
+    minSeconds: 60,
+    maxSeconds: 120
   });
 });
 
@@ -66,9 +66,9 @@ test('nm persists settings, restores timers after start, and stops every timer o
   });
   assert.deepEqual(calls.titles, [{ name: 'الاسم المحمي', threadID: 'thread-persist' }]);
   assert.deepEqual(JSON.parse(fs.readFileSync(dataFile, 'utf8')), {
-    version: 1,
+    version: 2,
     groups: {
-      'thread-persist': { name: 'الاسم المحمي', minMinutes: 1, maxMinutes: 1 }
+      'thread-persist': { name: 'الاسم المحمي', minSeconds: 60, maxSeconds: 60 }
     }
   });
 
@@ -89,6 +89,76 @@ test('nm persists settings, restores timers after start, and stops every timer o
   resumed.stop();
 });
 
+test('nm accepts seconds, schedules in seconds, and writes the version 2 format', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const dataFile = makeTempDataFile(t);
+  const command = createNmCommand({ dataFile, isAuthorized: () => true });
+  const { api, calls } = makeApi();
+  command.start(api);
+
+  await command.execute(api, {
+    body: '/nm اسم الثواني 2s 2s',
+    threadID: 'thread-seconds',
+    senderID: 'admin'
+  });
+  assert.deepEqual(command.getStatus('thread-seconds'), {
+    name: 'اسم الثواني',
+    minSeconds: 2,
+    maxSeconds: 2
+  });
+  t.mock.timers.tick(1999);
+  await flushAsyncWork();
+  assert.equal(calls.titles.length, 1, 'the timer does not fire before the second interval');
+  t.mock.timers.tick(1);
+  await flushAsyncWork();
+  assert.equal(calls.titles.length, 2, 'the timer fires after the configured seconds');
+  assert.deepEqual(JSON.parse(fs.readFileSync(dataFile, 'utf8')), {
+    version: 2,
+    groups: {
+      'thread-seconds': { name: 'اسم الثواني', minSeconds: 2, maxSeconds: 2 }
+    }
+  });
+  command.stop();
+});
+
+
+test('nm migrates legacy minute-based settings and accepts mixed second/minute ranges', async t => {
+  const dataFile = makeTempDataFile(t);
+  fs.mkdirSync(path.dirname(dataFile), { recursive: true });
+  fs.writeFileSync(dataFile, JSON.stringify({
+    version: 1,
+    groups: {
+      'thread-legacy': { name: 'اسم قديم', minMinutes: 1, maxMinutes: 2 }
+    }
+  }));
+  const command = createNmCommand({ dataFile, isAuthorized: () => true });
+  const { api } = makeApi();
+
+  assert.deepEqual(command.getStatus('thread-legacy'), {
+    name: 'اسم قديم',
+    minSeconds: 60,
+    maxSeconds: 120
+  });
+  await command.execute(api, {
+    body: '/nm time 30s 2m',
+    threadID: 'thread-legacy',
+    senderID: 'admin'
+  });
+  assert.deepEqual(command.getStatus('thread-legacy'), {
+    name: 'اسم قديم',
+    minSeconds: 30,
+    maxSeconds: 120
+  });
+  assert.deepEqual(JSON.parse(fs.readFileSync(dataFile, 'utf8')), {
+    version: 2,
+    groups: {
+      'thread-legacy': { name: 'اسم قديم', minSeconds: 30, maxSeconds: 120 }
+    }
+  });
+  command.stop();
+});
+
+
 test('nm time and off commands update persistence and cancel the group timer', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const dataFile = makeTempDataFile(t);
@@ -96,17 +166,17 @@ test('nm time and off commands update persistence and cancel the group timer', a
   const { api, calls } = makeApi();
   command.start(api);
 
-  await command.execute(api, { body: '/nm اسم ثابت 5 5', threadID: 'thread-off', senderID: 'admin' });
-  await command.execute(api, { body: '/nm time 2 3', threadID: 'thread-off', senderID: 'admin' });
+  await command.execute(api, { body: '/nm اسم ثابت 5s 5s', threadID: 'thread-off', senderID: 'admin' });
+  await command.execute(api, { body: '/nm time 2s 3s', threadID: 'thread-off', senderID: 'admin' });
   assert.deepEqual(command.getStatus('thread-off'), {
     name: 'اسم ثابت',
-    minMinutes: 2,
-    maxMinutes: 3
+    minSeconds: 2,
+    maxSeconds: 3
   });
 
   await command.execute(api, { body: '/nm off', threadID: 'thread-off', senderID: 'admin' });
   assert.equal(command.getStatus('thread-off'), null);
-  assert.deepEqual(JSON.parse(fs.readFileSync(dataFile, 'utf8')), { version: 1, groups: {} });
+  assert.deepEqual(JSON.parse(fs.readFileSync(dataFile, 'utf8')), { version: 2, groups: {} });
   const titlesBeforeAdvance = calls.titles.length;
   t.mock.timers.tick(5 * 60_000);
   await flushAsyncWork();

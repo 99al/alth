@@ -9,15 +9,15 @@
  *   await nm.execute(api, event, { authorized: true }); // بعد فحص المشرف
  *   nm.stop(); // عند قطع الاتصال/إعادة التشغيل
  *
- * الملف خارج Commands عمدًا: main.js الحالي لا يوجّه /nm، ولا يهيّئ
- * إضافات جديدة. لا تفعّل authorized إلا بعد فحص صلاحية المشرف في المستدعي.
+ * عند ربطها بالبوت، استدع execute بعد فحص صلاحية المشرف، وابدأ/أوقف المؤقتات
+ * مع دورة حياة الاتصال. لا تفعّل authorized قبل إتمام فحص الصلاحية.
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
 
-const MIN_MINUTES = 1;
-const MAX_MINUTES = 1440;
+const MIN_SECONDS = 1;
+const MAX_SECONDS = 24 * 60 * 60;
 const DEFAULT_DATA_FILE = path.join(__dirname, 'database', 'data', 'nmData.json');
 const HELP = [
   'طريقة الاستخدام:',
@@ -25,16 +25,54 @@ const HELP = [
   '/nm time min max',
   '/nm status',
   '/nm off',
-  'الأرقام بالدقائق، والحد المسموح من 1 إلى 1440.'
+  'الأرقام بلا وحدة بالدقائق؛ أضيفي s للثواني أو m للدقائق. المدى حتى 24 ساعة.'
 ].join('\n');
 
-function isValidRange(minMinutes, maxMinutes) {
-  return Number.isInteger(minMinutes) &&
-    Number.isInteger(maxMinutes) &&
-    minMinutes >= MIN_MINUTES &&
-    maxMinutes <= MAX_MINUTES &&
-    minMinutes <= maxMinutes;
+
+function isValidRange(minSeconds, maxSeconds) {
+  return Number.isInteger(minSeconds) &&
+    Number.isInteger(maxSeconds) &&
+    minSeconds >= MIN_SECONDS &&
+    maxSeconds <= MAX_SECONDS &&
+    minSeconds <= maxSeconds;
 }
+
+
+function parseDurationSeconds(value) {
+  const match = String(value == null ? '' : value).trim().match(/^(\d+)(s|m)?$/iu);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  if (!Number.isSafeInteger(amount)) return null;
+  const seconds = amount * (match[2] && match[2].toLowerCase() === 's' ? 1 : 60);
+  return Number.isSafeInteger(seconds) ? seconds : null;
+}
+
+
+function parseRange(minValue, maxValue) {
+  const minSeconds = parseDurationSeconds(minValue);
+  const maxSeconds = parseDurationSeconds(maxValue);
+  if (!isValidRange(minSeconds, maxSeconds)) return null;
+  return { minSeconds, maxSeconds };
+}
+
+
+function formatDuration(seconds) {
+  if (seconds % 60 === 0) {
+    const minutes = seconds / 60;
+    if (minutes === 1) return 'دقيقة واحدة';
+    if (minutes === 2) return 'دقيقتان';
+    return String(minutes) + ' دقائق';
+  }
+  if (seconds === 1) return 'ثانية واحدة';
+  if (seconds === 2) return 'ثانيتان';
+  return String(seconds) + ' ثانية';
+}
+
+
+function formatRange(minSeconds, maxSeconds) {
+  return formatDuration(minSeconds) + '–' + formatDuration(maxSeconds);
+}
+
 
 function validateEntry(entry, threadID) {
   if (
@@ -42,33 +80,42 @@ function validateEntry(entry, threadID) {
     typeof entry !== 'object' ||
     Array.isArray(entry) ||
     typeof entry.name !== 'string' ||
-    !entry.name.trim() ||
-    !isValidRange(entry.minMinutes, entry.maxMinutes)
+    !entry.name.trim()
   ) {
-    throw new Error(`Invalid nmData entry for thread ${threadID}`);
+    throw new Error('Invalid nmData entry for thread ' + threadID);
+  }
+  const hasSecondFields =
+    Object.prototype.hasOwnProperty.call(entry, 'minSeconds') ||
+    Object.prototype.hasOwnProperty.call(entry, 'maxSeconds');
+  const minSeconds = hasSecondFields ? entry.minSeconds : entry.minMinutes * 60;
+  const maxSeconds = hasSecondFields ? entry.maxSeconds : entry.maxMinutes * 60;
+  if (!isValidRange(minSeconds, maxSeconds)) {
+    throw new Error('Invalid nmData entry for thread ' + threadID);
   }
   return {
     name: entry.name.trim(),
-    minMinutes: entry.minMinutes,
-    maxMinutes: entry.maxMinutes
+    minSeconds,
+    maxSeconds
   };
 }
+
 
 function readState(filePath) {
   let raw;
   try {
     raw = fs.readFileSync(filePath, 'utf8');
   } catch (error) {
-    if (error && error.code === 'ENOENT') return { version: 1, groups: {} };
+    if (error && error.code === 'ENOENT') return { version: 2, groups: {} };
     throw error;
   }
+
 
   const parsed = JSON.parse(raw);
   if (
     !parsed ||
     typeof parsed !== 'object' ||
     Array.isArray(parsed) ||
-    parsed.version !== 1 ||
+    (parsed.version !== 1 && parsed.version !== 2) ||
     !parsed.groups ||
     typeof parsed.groups !== 'object' ||
     Array.isArray(parsed.groups)
@@ -76,12 +123,14 @@ function readState(filePath) {
     throw new Error('Invalid nmData.json structure; refusing to overwrite it');
   }
 
+
   const groups = {};
   for (const [threadID, entry] of Object.entries(parsed.groups)) {
     groups[threadID] = validateEntry(entry, threadID);
   }
-  return { version: 1, groups };
+  return { version: 2, groups };
 }
+
 
 function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
   const filePath = path.resolve(dataFile);
@@ -120,24 +169,27 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
     clearTimer(threadID);
     if (!activeApi || state.groups[threadID] !== entry) return;
 
-    const range = entry.maxMinutes - entry.minMinutes + 1;
-    const minutes = entry.minMinutes + Math.floor(Math.random() * range);
+
+    const range = entry.maxSeconds - entry.minSeconds + 1;
+    const seconds = entry.minSeconds + Math.floor(Math.random() * range);
     const timer = setTimeout(async () => {
       timers.delete(threadID);
       if (!activeApi || state.groups[threadID] !== entry) return;
 
+
       try {
         await activeApi.setTitle(entry.name, threadID);
       } catch (error) {
-        console.error(`[الث /nm] تعذر إعادة اسم المجموعة للمحادثة ${threadID}:`, error?.message || error);
+        console.error('[الث /nm] تعذر إعادة اسم المجموعة للمحادثة ' + threadID + ':', error?.message || error);
       } finally {
         if (activeApi && state.groups[threadID] === entry) {
           schedule(threadID, entry);
         }
       }
-    }, minutes * 60 * 1000);
+    }, seconds * 1000);
     timers.set(threadID, timer);
   }
+
 
   async function send(api, message, threadID) {
     if (!api || typeof api.sendMessage !== 'function') return false;
@@ -174,11 +226,12 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
     if (lowerArgs === 'status') {
       const entry = state.groups[threadID];
       const message = entry
-        ? `🔒 قفل الاسم مفعّل.\nالاسم: ${entry.name}\nالفاصل: ${entry.minMinutes}–${entry.maxMinutes} دقيقة.`
+        ? '🔒 قفل الاسم مفعّل.\nالاسم: ' + entry.name + '\nالفاصل: ' + formatRange(entry.minSeconds, entry.maxSeconds) + '.'
         : '🔓 لا يوجد قفل اسم مفعّل في هذه المجموعة.';
       await send(api, message, threadID);
       return true;
     }
+
 
     if (lowerArgs === 'off') {
       const previous = state.groups[threadID];
@@ -201,23 +254,23 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
     }
 
     if (/^time\s+/iu.test(args)) {
-      const timeMatch = args.match(/^time\s+(\d+)\s+(\d+)$/iu);
+      const timeMatch = args.match(/^time\s+(\d+(?:s|m)?)\s+(\d+(?:s|m)?)$/iu);
       if (!timeMatch) {
         await send(api, HELP, threadID);
         return true;
       }
-      const minMinutes = Number(timeMatch[1]);
-      const maxMinutes = Number(timeMatch[2]);
-      if (!isValidRange(minMinutes, maxMinutes)) {
-        await send(api, `الفاصل يجب أن يكون بين ${MIN_MINUTES} و${MAX_MINUTES} دقيقة، وأن يكون الحد الأدنى أقل من أو يساوي الأعلى.`, threadID);
+      const range = parseRange(timeMatch[1], timeMatch[2]);
+      if (!range) {
+        await send(api, 'الفاصل يجب أن يكون من ثانية واحدة إلى 24 ساعة، مع حد أدنى لا يتجاوز الأعلى. استخدمي s للثواني أو m للدقائق.', threadID);
         return true;
       }
+      const { minSeconds, maxSeconds } = range;
       const previous = state.groups[threadID];
       if (!previous) {
         await send(api, 'فعّلي القفل أولًا: /nm اسم المجموعة min max', threadID);
         return true;
       }
-      const updated = { ...previous, minMinutes, maxMinutes };
+      const updated = { ...previous, minSeconds, maxSeconds };
       state.groups[threadID] = updated;
       try {
         persist();
@@ -228,23 +281,25 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
         return true;
       }
       if (activeApi) schedule(threadID, updated);
-      await send(api, `تم تحديث الفاصل إلى ${minMinutes}–${maxMinutes} دقيقة.`, threadID);
+      await send(api, 'تم تحديث الفاصل إلى ' + formatRange(minSeconds, maxSeconds) + '.', threadID);
       return true;
     }
 
-    const nameMatch = args.match(/^(.+\S)\s+(\d+)\s+(\d+)$/u);
+
+    const nameMatch = args.match(/^(.+\S)\s+(\d+(?:s|m)?)\s+(\d+(?:s|m)?)$/u);
     if (!nameMatch) {
       await send(api, HELP, threadID);
       return true;
     }
 
+
     const name = nameMatch[1].trim();
-    const minMinutes = Number(nameMatch[2]);
-    const maxMinutes = Number(nameMatch[3]);
-    if (!name || !isValidRange(minMinutes, maxMinutes)) {
-      await send(api, `تأكدي من الاسم والفاصل؛ المدى المسموح ${MIN_MINUTES}–${MAX_MINUTES} دقيقة.`, threadID);
+    const range = parseRange(nameMatch[2], nameMatch[3]);
+    if (!name || !range) {
+      await send(api, 'تأكدي من الاسم والفاصل؛ المدى المسموح من ثانية واحدة إلى 24 ساعة. استخدمي s للثواني أو m للدقائق.', threadID);
       return true;
     }
+    const { minSeconds, maxSeconds } = range;
     if (!api || typeof api.setTitle !== 'function') {
       await send(api, 'واجهة setTitle غير متاحة في اتصال البوت الحالي.', threadID);
       return true;
@@ -259,7 +314,7 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
     }
 
     const previous = state.groups[threadID];
-    const entry = { name, minMinutes, maxMinutes };
+    const entry = { name, minSeconds, maxSeconds };
     state.groups[threadID] = entry;
     try {
       persist();
@@ -272,7 +327,7 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
     }
 
     if (activeApi) schedule(threadID, entry);
-    await send(api, `تم تفعيل قفل الاسم: ${name}\nالفاصل: ${minMinutes}–${maxMinutes} دقيقة.`, threadID);
+    await send(api, 'تم تفعيل قفل الاسم: ' + name + '\nالفاصل: ' + formatRange(minSeconds, maxSeconds) + '.', threadID);
     return true;
   }
 
