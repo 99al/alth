@@ -22,5 +22,8 @@
   },
   "بانكاي": {
     "enabled": false
+  },
+  "mc": {
+    "enabled": true
   }
 }

@@ -211,6 +211,21 @@ async function handleMessage(api, event, dependencies = {}) {
     }
   }
 
+  // ─── سحب رسالة البوت التي تم الرد عليها ───
+  if (/^\/?mc$/iu.test(body)) {
+    if (!canAdmin(senderID) || !commandEnabled('mc')) {
+      return;
+    }
+
+    const cmd = commands.get('mc');
+    if (cmd && typeof cmd.execute === 'function') {
+      Promise.resolve(cmd.execute(api, event))
+        .catch(() => console.error('[الث] تعذر تنفيذ أمر حذف الرسالة.'));
+    }
+
+    return;
+  }
+
   // ─── أمر قفل اسم المجموعة ───
   if (/^\/nm(?:\s|$)/iu.test(body)) {
     if (!commandEnabled('nm')) {
