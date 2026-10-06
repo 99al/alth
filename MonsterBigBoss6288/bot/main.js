@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const nmCommand = require('./nm-command.standalone');
 
 // ─── قراءة المشرفين من ملف admins-config.json ───
 function loadAdmins(configPath = path.join(__dirname, 'admins-config.json')) {
@@ -62,6 +63,7 @@ function loadCommands() {
     console.error('[الث] تعذر تحميل الأوامر.');
 
     commandRegistry.clear();
+    commandRegistry.set('nm', nmCommand);
     return;
   }
 
@@ -91,6 +93,8 @@ function loadCommands() {
       console.error('[الث] تعذر تحميل أحد الأوامر.');
     }
   }
+
+  commandRegistry.set('nm', nmCommand);
 
   console.log('[الث] اكتمل تحميل الأوامر.');
 }
@@ -205,6 +209,21 @@ async function handleMessage(api, event, dependencies = {}) {
     } catch {
       console.error('[الث] تعذر فحص الرد التلقائي.');
     }
+  }
+
+  // ─── أمر قفل اسم المجموعة ───
+  if (/^\/nm(?:\s|$)/iu.test(body)) {
+    if (!commandEnabled('nm')) {
+      return;
+    }
+
+    const cmd = commands.get('nm');
+    if (cmd && typeof cmd.execute === 'function') {
+      Promise.resolve(cmd.execute(api, event, { isAdmin: canAdmin }))
+        .catch(() => console.error('[الث] تعذر تنفيذ أمر قفل اسم المجموعة.'));
+    }
+
+    return;
   }
 
   // ─── إيقاف حلقات تغيير الأسماء في المحادثة الحالية ───
@@ -465,6 +484,14 @@ function cancelActiveNameLoops(threadID, commandMap = commandRegistry) {
   return cancelled;
 }
 
+function startNmCommand(api) {
+  return nmCommand.start(api);
+}
+
+function stopNmCommand() {
+  return nmCommand.stop();
+}
+
 // ─── معالجة الأحداث العامة ───
 function handleEvent(api, event) {
   // حالياً لا توجد معالجة خاصة للأحداث.
@@ -478,5 +505,7 @@ module.exports = {
   loadCommands,
   handleMessage,
   handleEvent,
-  cancelActiveNameLoops
+  cancelActiveNameLoops,
+  startNmCommand,
+  stopNmCommand
 };

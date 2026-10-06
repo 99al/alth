@@ -125,7 +125,22 @@ prepareFcaRuntimeConfig();
 
 const express = require('express');
 const login = require('@dongdev/fca-unofficial');
-const { loadCommands, handleMessage, handleEvent, cancelActiveNameLoops } = require('./main');
+const {
+  loadCommands,
+  handleMessage,
+  handleEvent,
+  cancelActiveNameLoops,
+  startNmCommand,
+  stopNmCommand
+} = require('./main');
+
+function stopNmTimers() {
+  try {
+    if (typeof stopNmCommand === 'function') stopNmCommand();
+  } catch {
+    console.error('[الث] تعذر إيقاف مؤقتات قفل الاسم.');
+  }
+}
 
 function verifyFcaRuntime() {
   if (
@@ -599,6 +614,7 @@ process.on('unhandledRejection', () => {
 
 process.on('SIGTERM', () => {
   cancelActiveNameLoops();
+  stopNmTimers();
   console.log(
     '[الث] ⚠️ استلمت SIGTERM — البوت يكمل'
   );
@@ -606,6 +622,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGHUP', () => {
   cancelActiveNameLoops();
+  stopNmTimers();
   console.log(
     '[الث] ⚠️ استلمت SIGHUP — البوت يكمل'
   );
@@ -745,6 +762,12 @@ function startBot() {
 
       loadCommands();
 
+      try {
+        if (typeof startNmCommand === 'function') startNmCommand(api);
+      } catch {
+        console.error('[الث] تعذر استئناف قفل اسم المجموعة.');
+      }
+
       startListening(api);
 
       startHeartbeat(api);
@@ -830,6 +853,8 @@ async function startListening(api) {
     const callback = (err, event) => {
 
       if (err) {
+
+        stopNmTimers();
 
         cancelActiveNameLoops();
 
@@ -929,6 +954,8 @@ async function startListening(api) {
 
   } catch (e) {
 
+    stopNmTimers();
+
     console.error(
       '[الث] ❌ استثناء في startListening (تفاصيل الخطأ محجوبة)'
     );
@@ -944,6 +971,7 @@ function scheduleRestart(delay) {
   isRestarting = true;
 
   cancelActiveNameLoops();
+  stopNmTimers();
 
   try {
     if (heartbeatInterval) {
