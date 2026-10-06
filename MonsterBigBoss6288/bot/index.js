@@ -2,6 +2,76 @@ const fs = require('fs');
 const path = require('path');
 const security = require('./security.cjs');
 const { loginPromiseApi } = require('./fca-login.cjs');
+const delayedSendQueues = new Map();
+
+function installDelayedSendMessage(api) {
+  if (!api || typeof api.sendMessage !== 'function') return false;
+  if (api.sendMessage.__althDelayedSendMessage === true) return true;
+
+  const rawSendMessage = api.sendMessage.bind(api);
+  const wrappedSendMessage = function (msg, threadID, callback, ...rest) {
+    const text = typeof msg === 'string' ? msg : (msg?.body || '');
+    const typingDuration = text.length > 50 ? 4500 : 3500;
+    const queueKey = String(threadID ?? '');
+    const previous = delayedSendQueues.get(queueKey) || Promise.resolve();
+
+    const sendPromise = previous.catch(() => {}).then(() => new Promise((resolve, reject) => {
+      if (typeof api.sendTypingIndicator === 'function') {
+        try {
+          Promise.resolve(
+            api.sendTypingIndicator(threadID, true, { autoStop: false }, () => {})
+          ).catch(() => {});
+        } catch {}
+      }
+
+      setTimeout(() => {
+        if (typeof api.sendTypingIndicator === 'function') {
+          try {
+            Promise.resolve(
+              api.sendTypingIndicator(threadID, false, { autoStop: false }, () => {})
+            ).catch(() => {});
+          } catch {}
+        }
+
+        setTimeout(() => {
+          const args = [msg, threadID, callback, ...rest];
+          if (typeof callback === 'function') {
+            args[2] = (sendErr, messageInfo) => {
+              try { callback(sendErr, messageInfo); } catch {}
+            };
+          }
+
+          try {
+            Promise.resolve(rawSendMessage(...args)).then(resolve, reject);
+          } catch (sendErr) {
+            reject(sendErr);
+          }
+        }, 1000);
+      }, typingDuration);
+    }));
+
+    delayedSendQueues.set(queueKey, sendPromise);
+    sendPromise.finally(() => {
+      if (delayedSendQueues.get(queueKey) === sendPromise) {
+        delayedSendQueues.delete(queueKey);
+      }
+    }).catch(() => {});
+
+    return sendPromise;
+  };
+
+  Object.defineProperty(wrappedSendMessage, '__althDelayedSendMessage', {
+    value: true
+  });
+
+  try {
+    api.sendMessage = wrappedSendMessage;
+    return api.sendMessage === wrappedSendMessage;
+  } catch {
+    return false;
+  }
+}
+
 
 function prepareFcaRuntimeConfig() {
   const configPath = path.join(process.cwd(), 'fca-config.json');
@@ -638,6 +708,7 @@ function startBot() {
       isRestarting = false;
       reconnectAttempts = 0;
       botApi = api;
+      installDelayedSendMessage(api);
 
       try {
         if (
