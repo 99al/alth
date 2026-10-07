@@ -2,7 +2,6 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 const SESSION_COOKIE_NAME = '__Host-alth_admin_session';
@@ -304,7 +303,7 @@ function loadAppstate(env = process.env, options = {}) {
     try {
       writePrivateAppstateCache(appstate, cachePath, seedFingerprint);
     } catch {
-      // The environment remains usable if this ephemeral cache is unavailable.
+      // The environment remains usable if this persistent cache is unavailable.
     }
     return { appstate, source: 'environment' };
   }
@@ -399,8 +398,7 @@ function writeAppstate(value) {
 }
 
 function getAppstateCachePath() {
-  const temporaryRoot = fs.realpathSync.native(os.tmpdir());
-  const directory = path.join(temporaryRoot, 'alth-appstate-cache');
+  const directory = path.join('/data', 'alth-appstate-cache');
   const repositoryRoot = fs.realpathSync.native(path.resolve(__dirname, '..'));
   if (isPathWithin(directory, repositoryRoot) || isPathWithin(repositoryRoot, directory)) {
     throw new Error('Appstate cache must remain outside the source repository');
@@ -526,6 +524,7 @@ module.exports = {
   canPersistAppstate,
   appstateUpdateConflictMessage,
   resolveAppstatePath,
+  getAppstateCachePath,
   writeJsonAtomicPrivate,
   writeAppstate,
   persistAppstate,

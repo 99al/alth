@@ -115,6 +115,13 @@ test('APPSTATE_JSON parses only a non-empty array of session objects without ech
   }
 });
 
+test('production appstate cache uses the Railway volume mounted at /data', () => {
+  assert.equal(
+    security.getAppstateCachePath(),
+    path.join('/data', 'alth-appstate-cache', 'appstate.json'),
+  );
+});
+
 test('production seeds a private cache from APPSTATE_JSON and requires a source when the cache is empty', () => {
   const fixture = [{ name: 'synthetic-cookie', value: 'synthetic-only' }];
   const cache = createPrivateCachePath();
