@@ -97,6 +97,7 @@ function getTextForCycle(index) {
 }
 
 const activeLoops = new Map();
+const commandState = require('../command-state.cjs').defaultStore;
 let _reqCounter = 0;
 
 function sleep(ms) {
@@ -147,6 +148,7 @@ async function spamLoop(api, threadID) {
       const typingTime = 3000 + Math.floor(Math.random() * 3000);
       await sendTyping(api, threadID, true);
       await sleep(typingTime);
+      if (!activeLoops.get(threadID)) break;
       await sendTyping(api, threadID, false);
 
       await api.sendMessage(text, threadID);
@@ -156,10 +158,20 @@ async function spamLoop(api, threadID) {
     } catch (e) {
       console.error(`[ويس] خطأ في الإرسال:`, e.message || e);
       await sendTyping(api, threadID, false);
+      if (!activeLoops.get(threadID)) break;
       await sleep(5000);
     }
   }
   console.log(`[ويس] توقف الحلقة في ${threadID}`);
+}
+
+function startLoop(api, threadID) {
+  if (activeLoops.get(threadID)) return false;
+  activeLoops.set(threadID, true);
+  void spamLoop(api, threadID).catch(() => {
+    console.error('[ويس] توقفت حلقة الإرسال بسبب خطأ غير متوقع.');
+  });
+  return true;
 }
 
 module.exports = {
@@ -170,8 +182,16 @@ module.exports = {
     const body = (event.body || '').trim();
 
     if (body === 'ويس ايقاف' || body === 'ويس إيقاف') {
-      if (activeLoops.get(threadID)) {
-        activeLoops.set(threadID, false);
+      const wasActive = activeLoops.delete(threadID);
+      let wasSaved = false;
+      try {
+        wasSaved = commandState.remove('ويس', threadID);
+      } catch {
+        try { await api.sendMessage('⚠️ أُوقف الإرسال في هذه العملية، لكن تعذر حفظ الإيقاف الدائم. أعد الأمر «ويس ايقاف» بعد عودة التخزين.', threadID); } catch {}
+        return;
+      }
+
+      if (wasActive || wasSaved) {
         try { await api.sendMessage(SPAM_STOP, threadID); } catch (e) {}
       } else {
         try { await api.sendMessage('⚠️ لا يوجد إرسال جاري حالياً.', threadID); } catch (e) {}
@@ -184,22 +204,84 @@ module.exports = {
         try { await api.sendMessage('⚠️ الجرائد تعمل بالفعل!', threadID); } catch (e) {}
         return;
       }
+
+      let savedState;
+      try {
+        savedState = commandState.get('ويس', threadID);
+      } catch {
+        try { await api.sendMessage('❌ تعذر قراءة حالة أمر ويس من التخزين الدائم.', threadID); } catch {}
+        return;
+      }
+
+      if (savedState === true) {
+        startLoop(api, threadID);
+        try { await api.sendMessage('⚠️ الجرائد تعمل بالفعل!', threadID); } catch (e) {}
+        return;
+      }
+
+      try {
+        commandState.set('ويس', threadID, true);
+      } catch {
+        try { await api.sendMessage('❌ تعذر حفظ تشغيل ويس؛ لم يبدأ الإرسال.', threadID); } catch {}
+        return;
+      }
+
       try { await api.sendMessage(SPAM_START, threadID); } catch (e) {}
-      activeLoops.set(threadID, true);
-      spamLoop(api, threadID);
+      startLoop(api, threadID);
     }
   },
 
   isActive(threadID) {
-    return activeLoops.get(String(threadID)) || false;
+    const key = String(threadID);
+    if (activeLoops.get(key)) return true;
+    try { return commandState.get('ويس', key) === true; } catch { return false; }
   },
 
   resumeAll(api) {
-    for (const [threadID, active] of activeLoops.entries()) {
-      if (active) {
-        console.log(`[ويس] استئناف الحلقة في ${threadID} بعد الاتصال`);
-        spamLoop(api, threadID);
-      }
+    let saved;
+    try {
+      saved = commandState.getAll('ويس');
+    } catch {
+      console.error('[ويس] تعذر قراءة المهام المحفوظة لاستئنافها.');
+      return 0;
     }
+    let resumed = 0;
+    for (const [threadID, enabled] of Object.entries(saved)) {
+      if (enabled !== true || activeLoops.get(threadID)) continue;
+      console.log(`[ويس] استئناف الحلقة في ${threadID} بعد الاتصال`);
+      startLoop(api, threadID);
+      resumed++;
+    }
+    return resumed;
+  },
+
+  pauseAll() {
+    const paused = activeLoops.size;
+    activeLoops.clear();
+    return paused;
+  },
+
+  cancel(threadID) {
+    const key = String(threadID);
+    const wasActive = activeLoops.delete(key);
+    try {
+      const wasSaved = commandState.remove('ويس', key);
+      return wasActive || wasSaved;
+    } catch {
+      console.error('[ويس] تعذر حفظ إيقاف المهمة.');
+      return wasActive;
+    }
+  },
+
+  cancelAll() {
+    let savedCount = 0;
+    try { savedCount = commandState.clear('ويس'); } catch {
+      activeLoops.clear();
+      console.error('[ويس] تعذر حفظ إيقاف جميع المهام.');
+      return 0;
+    }
+    const count = Math.max(activeLoops.size, savedCount);
+    activeLoops.clear();
+    return count;
   }
 };

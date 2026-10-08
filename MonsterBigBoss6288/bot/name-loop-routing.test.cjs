@@ -1,8 +1,12 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
+process.env.NODE_ENV = 'test';
+process.env.ALTH_COMMAND_STATE_PATH = path.join(os.tmpdir(), `alth-name-loop-routing-${process.pid}`, 'state.json');
+const commandState = require('./command-state.cjs').defaultStore;
 const { cancelActiveNameLoops, handleMessage } = require('./main');
 const nicknameCommand = require('./Commands/هويه');
 const groupCommand = require('./Commands/قروب');
@@ -41,6 +45,7 @@ function makeApi(overrides = {}) {
     threadInfo: []
   };
   const nicknamesByThread = new Map();
+  const groupNamesByThread = new Map();
 
   const api = {
     async sendMessage(message, threadID) {
@@ -54,7 +59,7 @@ function makeApi(overrides = {}) {
       const nicknames = nicknamesByThread.get(key) || new Map();
       return {
         participantIDs: ['member-1'],
-        threadName: 'محمي',
+        threadName: groupNamesByThread.get(key) || 'محمي',
         nicknames: Object.fromEntries(nicknames)
       };
     },
@@ -71,7 +76,9 @@ function makeApi(overrides = {}) {
       if (overrides.nickname) return overrides.nickname(nickname, threadID, memberID);
     },
     async gcname(groupName, threadID) {
-      calls.groupNames.push({ groupName, threadID: String(threadID) });
+      const key = String(threadID);
+      calls.groupNames.push({ groupName, threadID: key });
+      groupNamesByThread.set(key, groupName);
       if (overrides.gcname) return overrides.gcname(groupName, threadID);
     }
   };
@@ -222,7 +229,7 @@ test('a repeated قروب invocation replaces the pending delay instead of creat
   assert.equal(groupCommand.cancel('thread-dup'), true);
 });
 
-test('قروب protection ends at 24 hours and does not keep polling afterward', async t => {
+test('قروب protection survives 24 hours and is removed only by manual stop', async t => {
   withMockTimers(t);
 
   const { api, calls } = makeApi({
@@ -238,14 +245,16 @@ test('قروب protection ends at 24 hours and does not keep polling afterward',
   await flushAsyncWork();
   assert.deepEqual(calls.groupNames, [{ groupName: 'اسم محمي', threadID: 'thread-expiry' }]);
 
-  t.mock.timers.tick(24 * 60 * 60 * 1000);
+  t.mock.timers.tick(24 * 60 * 60 * 1000 + 10_000);
   await flushAsyncWork();
-  assert.equal(groupCommand.cancel('thread-expiry'), false);
+  assert.deepEqual(commandState.get('قروب', 'thread-expiry'), { name: 'اسم محمي' });
+  assert.equal(groupCommand.cancel('thread-expiry'), true);
+  assert.equal(commandState.get('قروب', 'thread-expiry'), undefined);
 
-  const readsAfterExpiry = calls.threadInfo.length;
+  const readsAfterStop = calls.threadInfo.length;
   t.mock.timers.tick(30_000);
   await flushAsyncWork();
-  assert.equal(calls.threadInfo.length, readsAfterExpiry);
+  assert.equal(calls.threadInfo.length, readsAfterStop);
   assert.equal(calls.groupNames.length, 1);
 });
 
@@ -294,7 +303,7 @@ test('هويه compares ThreadInfo.nicknames and only writes nicknames that diff
   assert.equal(nicknameCommand.cancel('thread-nickname'), true);
 });
 
-test('هويه protection expires after 24 hours and stops reading nicknames', async t => {
+test('هويه protection survives 24 hours and is removed only by manual stop', async t => {
   withMockTimers(t);
   const { api, calls } = makeApi({
     getThreadInfo: async () => ({
@@ -313,14 +322,16 @@ test('هويه protection expires after 24 hours and stops reading nicknames', a
   await flushAsyncWork();
   assert.equal(calls.nicknames.length, 0);
 
-  t.mock.timers.tick(24 * 60 * 60 * 1000);
+  t.mock.timers.tick(24 * 60 * 60 * 1000 + 10_000);
   await flushAsyncWork();
-  assert.equal(nicknameCommand.cancel('thread-nickname-expiry'), false);
+  assert.deepEqual(commandState.get('هويه', 'thread-nickname-expiry'), { nickname: 'لقب' });
+  assert.equal(nicknameCommand.cancel('thread-nickname-expiry'), true);
+  assert.equal(commandState.get('هويه', 'thread-nickname-expiry'), undefined);
 
-  const readsAfterExpiry = calls.threadInfo.length;
+  const readsAfterStop = calls.threadInfo.length;
   t.mock.timers.tick(30_000);
   await flushAsyncWork();
-  assert.equal(calls.threadInfo.length, readsAfterExpiry);
+  assert.equal(calls.threadInfo.length, readsAfterStop);
   assert.equal(calls.nicknames.length, 0);
 });
 
@@ -345,7 +356,7 @@ test('a repeated هويه invocation does not create a second nickname timer', a
   assert.equal(nicknameCommand.cancel('thread-nick-dup'), true);
 });
 
-test('disconnect cleanup cancels all name loops and prevents an in-flight stale poll from mutating', async t => {
+test('disconnect pause keeps desired name state and prevents an in-flight stale poll from mutating', async t => {
   withMockTimers(t);
 
   let resolveThreadInfo;
@@ -374,25 +385,34 @@ test('disconnect cleanup cancels all name loops and prevents an in-flight stale 
   });
   await flushAsyncWork();
 
-  assert.equal(cancelActiveNameLoops(undefined, commands), 2);
+  const { pausePersistentCommands } = require('./main');
+  assert.ok(pausePersistentCommands(commands) >= 2);
   resolveThreadInfo({ threadName: 'اسم تغيّر أثناء الانقطاع' });
   await Promise.all([groupRun, nicknameRun]);
   await flushAsyncWork();
 
   const groupMutationCount = groupApi.calls.groupNames.length;
   assert.equal(groupMutationCount, 1);
+  assert.deepEqual(commandState.get('قروب', 'thread-disconnect'), { name: 'اسم محمي' });
+  assert.deepEqual(commandState.get('هويه', 'thread-disconnect'), { nickname: 'لقب' });
   t.mock.timers.tick(24 * 60 * 60 * 1000);
   await flushAsyncWork();
 
   assert.equal(groupApi.calls.groupNames.length, groupMutationCount);
   assert.equal(nicknameApi.calls.nicknames.length, 0);
-  assert.equal(groupCommand.cancel('thread-disconnect'), false);
+  assert.equal(groupCommand.cancel('thread-disconnect'), true);
+  assert.equal(nicknameCommand.cancel('thread-disconnect'), true);
+  assert.equal(commandState.get('قروب', 'thread-disconnect'), undefined);
+  assert.equal(commandState.get('هويه', 'thread-disconnect'), undefined);
 });
 
 test('restart path invokes name-operation cleanup', () => {
   const indexSource = fs.readFileSync(path.join(__dirname, 'index.js'), 'utf8');
   const restartBody = indexSource.match(/function scheduleRestart\(delay\) \{([\s\S]*?)\n\}/);
+  const hangupBody = indexSource.match(/process\.on\('SIGHUP',[\s\S]*?\n\}\);/);
 
   assert.ok(restartBody, 'scheduleRestart should be present');
-  assert.match(restartBody[1], /cancelActiveNameLoops\(\)/);
+  assert.ok(hangupBody, 'SIGHUP should be handled');
+  assert.match(restartBody[1], /pausePersistentCommands\(\)/);
+  assert.match(hangupBody[0], /scheduleRestart\(1000\)/);
 });
