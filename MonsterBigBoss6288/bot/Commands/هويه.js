@@ -1,8 +1,8 @@
 const { createThreadRunRegistry } = require('../name-loop-registry.cjs');
+const commandState = require('../command-state.cjs').defaultStore;
 
 const MIN_DELAY_SECONDS = 3;
 const MAX_DELAY_SECONDS = 5;
-const PROTECTION_DURATION = 24 * 60 * 60 * 1000;
 const CHECK_INTERVAL = 10 * 1000;
 const activeRuns = createThreadRunRegistry();
 
@@ -30,9 +30,7 @@ async function getThreadNicknameState(api, threadID) {
   }
 
   for (const value of Object.values(info.nicknames)) {
-    if (typeof value !== 'string') {
-      throw new Error('Thread nickname state is invalid.');
-    }
+    if (typeof value !== 'string') throw new Error('Thread nickname state is invalid.');
   }
 
   return {
@@ -43,23 +41,15 @@ async function getThreadNicknameState(api, threadID) {
 
 function currentNickname(nicknames, userID) {
   const key = String(userID);
-  return Object.prototype.hasOwnProperty.call(nicknames, key)
-    ? nicknames[key]
-    : '';
+  return Object.prototype.hasOwnProperty.call(nicknames, key) ? nicknames[key] : '';
 }
 
 function startProtection(run, api, threadID, nickname) {
   let checkInProgress = false;
 
-  activeRuns.scheduleTimeout(run, () => {
-    activeRuns.finish(run);
-    console.log('[هويه] انتهت حماية الكنيات بعد 24 ساعة.');
-  }, PROTECTION_DURATION);
-
-  activeRuns.scheduleInterval(run, async () => {
+  const reconcile = async () => {
     if (checkInProgress || !activeRuns.isActive(run)) return;
     checkInProgress = true;
-
     try {
       const state = await getThreadNicknameState(api, threadID);
       if (!activeRuns.isActive(run)) return;
@@ -68,12 +58,8 @@ function startProtection(run, api, threadID, nickname) {
       for (const userID of state.participants) {
         if (!activeRuns.isActive(run)) return;
         if (currentNickname(state.nicknames, userID) === nickname) continue;
-
-        if (attemptedWrites > 0 && !await activeRuns.wait(run, randomDelay())) {
-          return;
-        }
+        if (attemptedWrites > 0 && !await activeRuns.wait(run, randomDelay())) return;
         if (!activeRuns.isActive(run)) return;
-
         try {
           await api.nickname(nickname, threadID, userID);
           if (!activeRuns.isActive(run)) return;
@@ -88,13 +74,20 @@ function startProtection(run, api, threadID, nickname) {
     } finally {
       checkInProgress = false;
     }
-  }, CHECK_INTERVAL);
+  };
+
+  void reconcile();
+  activeRuns.scheduleInterval(run, () => { void reconcile(); }, CHECK_INTERVAL);
+}
+
+function isValidSavedNickname(entry) {
+  return entry && typeof entry === 'object' && typeof entry.nickname === 'string' && entry.nickname.trim() !== '';
 }
 
 module.exports = {
   name: 'هويه',
   aliases: ['هوية'],
-  description: 'تغيير كنيات أعضاء المجموعة بفاصل عشوائي 3-5 ثوانٍ وحمايتها 24 ساعة',
+  description: 'تغيير كنيات أعضاء المجموعة وحمايتها حتى إيقافها يدويًا',
 
   async execute(api, event) {
     const threadID = String(event && event.threadID || '');
@@ -117,12 +110,21 @@ module.exports = {
     }
 
     let protectionStarted = false;
+    let desiredStateSaved = false;
     try {
       const state = await getThreadNicknameState(api, threadID);
       if (!activeRuns.isActive(run)) return;
 
+      try {
+        commandState.set('هويه', threadID, { nickname });
+        desiredStateSaved = true;
+      } catch {
+        await api.sendMessage('❌ تعذر حفظ حماية الكنيات في التخزين الدائم؛ لم يبدأ الأمر.', threadID);
+        return;
+      }
+
       await api.sendMessage(
-        `⏳ سيتم ضبط كنيات ${state.participants.length} عضوًا إلى «${nickname}» بفاصل عشوائي بين 3 و5 ثوانٍ، ثم حمايتها 24 ساعة.`,
+        `⏳ سيتم ضبط كنيات ${state.participants.length} عضوًا إلى «${nickname}» بفاصل عشوائي بين 3 و5 ثوانٍ، ثم حمايتها حتى إيقافها يدويًا.`,
         threadID
       );
       if (!activeRuns.isActive(run)) return;
@@ -131,12 +133,10 @@ module.exports = {
       for (const userID of state.participants) {
         if (!await activeRuns.wait(run, randomDelay())) return;
         if (!activeRuns.isActive(run)) return;
-
         if (currentNickname(state.nicknames, userID) === nickname) {
           successCount++;
           continue;
         }
-
         try {
           await api.nickname(nickname, threadID, userID);
           if (!activeRuns.isActive(run)) return;
@@ -150,14 +150,16 @@ module.exports = {
       if (!activeRuns.isActive(run)) return;
       startProtection(run, api, threadID, nickname);
       protectionStarted = true;
-
       await api.sendMessage(
-        `✅ اكتمل أمر هويه: تم تطبيق الكنية المطلوبة على ${successCount}/${state.participants.length} عضوًا. الحماية مفعلة لمدة 24 ساعة.`,
+        `✅ اكتمل أمر هويه: تم تطبيق الكنية المطلوبة على ${successCount}/${state.participants.length} عضوًا. الحماية مفعلة حتى إيقافها يدويًا.`,
         threadID
       );
     } catch {
       console.error('[هويه] تعذر تنفيذ أمر تغيير الكنيات.');
-      if (activeRuns.isActive(run)) {
+      if (desiredStateSaved && activeRuns.isActive(run)) {
+        startProtection(run, api, threadID, nickname);
+        protectionStarted = true;
+      } else if (activeRuns.isActive(run)) {
         await api.sendMessage('❌ تعذر قراءة الكنيات أو تنفيذ الأمر بأمان.', threadID);
       }
     } finally {
@@ -165,11 +167,47 @@ module.exports = {
     }
   },
 
+  resumeAll(api) {
+    let saved;
+    try { saved = commandState.getAll('هويه'); } catch {
+      console.error('[هويه] تعذر قراءة حمايات الكنيات المحفوظة.');
+      return 0;
+    }
+    let resumed = 0;
+    for (const [threadID, entry] of Object.entries(saved)) {
+      if (!isValidSavedNickname(entry) || activeRuns.has(threadID)) continue;
+      const run = activeRuns.begin(threadID);
+      if (!run) continue;
+      startProtection(run, api, threadID, entry.nickname);
+      resumed++;
+    }
+    return resumed;
+  },
+
+  pauseAll() {
+    return activeRuns.cancelAll();
+  },
+
   cancel(threadID) {
-    return activeRuns.cancel(threadID);
+    const key = String(threadID);
+    const wasActive = activeRuns.cancel(key);
+    try {
+      const wasSaved = commandState.remove('هويه', key);
+      return wasActive || wasSaved;
+    } catch {
+      console.error('[هويه] تعذر حفظ إيقاف حماية الكنيات.');
+      const error = new Error('Could not persist manual stop.');
+      error.code = 'COMMAND_STATE_WRITE_FAILED';
+      error.cancelled = wasActive;
+      throw error;
+    }
   },
 
   cancelAll() {
-    return activeRuns.cancelAll();
+    const wasActive = activeRuns.cancelAll();
+    try { return Math.max(wasActive, commandState.clear('هويه')); } catch {
+      console.error('[هويه] تعذر حفظ إيقاف حمايات الكنيات.');
+      return wasActive;
+    }
   }
 };
