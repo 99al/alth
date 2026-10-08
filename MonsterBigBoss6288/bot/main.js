@@ -146,6 +146,17 @@ async function handleMessage(api, event, dependencies = {}) {
     event.senderID || ''
   );
 
+  // ─── قائمة الأوامر ───
+  if (/^(?:اومر|أوامر)(?:\s|$)/u.test(body)) {
+    if (!commandEnabled('اومر')) return;
+    const cmd = commands.get('اومر');
+    if (cmd && typeof cmd.execute === 'function') {
+      Promise.resolve(cmd.execute(api, event))
+        .catch(() => console.error('[الث] تعذر عرض قائمة الأوامر.'));
+    }
+    return;
+  }
+
   // ─── عداد الرسائل ───
   // يتفاعل البوت عند الرسالة 568
   // وكل مضاعفاتها
@@ -198,6 +209,7 @@ async function handleMessage(api, event, dependencies = {}) {
     commands.get('رد');
 
   if (
+    commandEnabled('رد') &&
     replyCmd &&
     typeof replyCmd.checkAutoReply === 'function'
   ) {
@@ -247,10 +259,13 @@ async function handleMessage(api, event, dependencies = {}) {
       return;
     }
 
-    const stopped = cancelActiveNameLoops(threadID, commands) > 0;
-    const response = stopped
-      ? '⏹️ تم إيقاف عمليات تغيير الأسماء والكنيات وحماياتها ومؤقتاتها في هذه المحادثة.'
-      : 'ℹ️ لا توجد عمليات تغيير أسماء نشطة في هذه المحادثة.';
+    const stopResult = cancelActiveNameLoops(threadID, commands, { details: true });
+    const stopped = stopResult.cancelled > 0;
+    const response = stopResult.persistenceFailures > 0
+      ? '⚠️ أُوقفت الحمايات الحالية، لكن تعذر حفظ الإيقاف على التخزين الدائم؛ قد تعود بعد إعادة تشغيل الخدمة. تحقق من وحدة /data ثم أعد «إيقاف الاسم».'
+      : stopped
+        ? '⏹️ تم إيقاف عمليات تغيير الأسماء والكنيات وحماياتها ومؤقتاتها في هذه المحادثة.'
+        : 'ℹ️ لا توجد عمليات تغيير أسماء نشطة في هذه المحادثة.';
 
     if (api && typeof api.sendMessage === 'function') {
       Promise.resolve(api.sendMessage(response, threadID))
@@ -335,30 +350,28 @@ async function handleMessage(api, event, dependencies = {}) {
     return;
   }
 
-  // ─── أمر جرائد ───
-  if (
-    body.startsWith('جرائد ') ||
-    body === 'جرائد إيقاف' ||
-    body === 'جرائد ايقاف'
-  ) {
-    if (!isAdmin(senderID)) {
+  // ─── أمر جريد مع إبقاء جرائد كاسم بديل ───
+  if (/^(?:جريد|جرائد)(?:\s|$)/u.test(body)) {
+    if (!canAdmin(senderID)) {
       return;
     }
 
-    if (!isCommandEnabled('جرائد')) {
+    if (!commandEnabled('جريد')) {
       return;
     }
 
-    const cmd =
-      commands.get('جرائد');
+    const cmd = commands.get('جريد');
 
     if (
       cmd &&
       typeof cmd.execute === 'function'
     ) {
+      const commandEvent = body.startsWith('جرائد')
+        ? { ...event, body: body.replace(/^جرائد(?=\s|$)/u, 'جريد') }
+        : event;
       Promise.resolve(
-        cmd.execute(api, event)
-      ).catch(() => console.error('[الث] تعذر تنفيذ الأمر.'));
+        cmd.execute(api, commandEvent)
+      ).catch(() => console.error('[الث] تعذر تنفيذ أمر جريد.'));
     }
 
     return;
@@ -472,10 +485,11 @@ async function handleMessage(api, event, dependencies = {}) {
   }
 }
 
-function cancelActiveNameLoops(threadID, commandMap = commandRegistry) {
+function cancelActiveNameLoops(threadID, commandMap = commandRegistry, options = {}) {
   const isThreadScoped = threadID !== undefined && threadID !== null;
   const targetThread = isThreadScoped ? String(threadID) : undefined;
   let cancelled = 0;
+  let persistenceFailures = 0;
 
   for (const name of ['هويه', 'قروب', 'كاتش']) {
     const command = commandMap.get(name);
@@ -491,12 +505,47 @@ function cancelActiveNameLoops(threadID, commandMap = commandRegistry) {
       } else if (result) {
         cancelled += 1;
       }
-    } catch {
+    } catch (error) {
+      if (error && error.code === 'COMMAND_STATE_WRITE_FAILED') {
+        persistenceFailures++;
+        if (error.cancelled) cancelled++;
+      }
       // التنظيف يجب ألا يمنع إعادة الاتصال أو إيقاف أمر آخر.
     }
   }
 
-  return cancelled;
+  return options.details ? { cancelled, persistenceFailures } : cancelled;
+}
+
+function pausePersistentCommands(commandMap = commandRegistry) {
+  let paused = 0;
+  for (const name of ['ويس', 'جريد', 'هويه', 'قروب', 'كاتش']) {
+    const command = commandMap.get(name);
+    if (!command || typeof command.pauseAll !== 'function') continue;
+    try {
+      const result = command.pauseAll();
+      if (typeof result === 'number') paused += result;
+      else if (result) paused++;
+    } catch {
+      console.error('[الث] تعذر تعليق إحدى المهام المحفوظة مؤقتًا.');
+    }
+  }
+  return paused;
+}
+
+function resumePersistentCommands(api, commandMap = commandRegistry) {
+  let resumed = 0;
+  for (const name of ['ويس', 'جريد', 'هويه', 'قروب', 'كاتش']) {
+    const command = commandMap.get(name);
+    if (!command || typeof command.resumeAll !== 'function') continue;
+    try {
+      const result = command.resumeAll(api);
+      if (typeof result === 'number') resumed += result;
+    } catch {
+      console.error('[الث] تعذر استئناف إحدى المهام المحفوظة.');
+    }
+  }
+  return resumed;
 }
 
 function startNmCommand(api) {
@@ -509,18 +558,30 @@ function stopNmCommand() {
 
 // ─── معالجة الأحداث العامة ───
 function handleEvent(api, event) {
-  // حالياً لا توجد معالجة خاصة للأحداث.
-  // وجود الدالة مهم حتى يستطيع index.js استيرادها.
-  return;
+  const command = commandRegistry.get('كاتش');
+  if (!command || !event) return;
+  try {
+    if (typeof command.handleNicknameEvent === 'function') {
+      command.handleNicknameEvent(api, event);
+    }
+    if (typeof command.handleGroupNameEvent === 'function') {
+      command.handleGroupNameEvent(api, event);
+    }
+  } catch {
+    console.error('[الث] تعذر تطبيق حماية حدث المجموعة.');
+  }
 }
 
 // ─── تصدير الدوال إلى index.js ───
 module.exports = {
   loadAdmins,
   loadCommands,
+  commands: commandRegistry,
   handleMessage,
   handleEvent,
   cancelActiveNameLoops,
+  pausePersistentCommands,
+  resumePersistentCommands,
   startNmCommand,
   stopNmCommand
 };

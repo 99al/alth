@@ -1,6 +1,12 @@
 const assert = require('node:assert/strict');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
-const { cancelActiveNameLoops, handleMessage } = require('./main');
+
+process.env.NODE_ENV = 'test';
+process.env.ALTH_COMMAND_STATE_PATH = path.join(os.tmpdir(), `alth-name-loop-katch-${process.pid}`, 'state.json');
+
+const { cancelActiveNameLoops, handleMessage, handleEvent, loadCommands, commands } = require('./main');
 const katchCommand = require('./Commands/\\u0643\\u0627\\u062a\\u0634.js');
 
 function withMockTimers(t) {
@@ -137,4 +143,32 @@ test('disconnect cleanup cancels pending كاتش event timers', async t => {
   await flushAsyncWork();
   assert.equal(calls.nicknames.length, 0);
   assert.equal(calls.groupNames.length, 0);
+});
+
+test('main forwards group-name and nickname events to the loaded كاتش protection', async t => {
+  withMockTimers(t);
+  loadCommands();
+  const command = commands.get('كاتش');
+  assert.ok(command);
+  const threadID = 'thread-event-router';
+  command.getProtectedNicknames().set(threadID, 'كنية محمية');
+  command.getProtectedGroupNames().set(threadID, 'اسم محمي');
+  const { api, calls } = makeApi();
+
+  handleEvent(api, {
+    type: 'change_thread_name',
+    threadID,
+    logMessageData: { name: 'اسم مختلف' }
+  });
+  handleEvent(api, {
+    type: 'log:thread-name',
+    threadID,
+    logMessageData: { participant_id: 'member-1', nickname: 'كنية مختلفة' }
+  });
+  t.mock.timers.tick(300);
+  await flushAsyncWork();
+
+  assert.deepEqual(calls.groupNames, [{ groupName: 'اسم محمي', threadID }]);
+  assert.deepEqual(calls.nicknames, [{ nickname: 'كنية محمية', threadID, userID: 'member-1' }]);
+  command.cancel(threadID);
 });

@@ -14,11 +14,21 @@
  */
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const MIN_SECONDS = 1;
 const MAX_SECONDS = 24 * 60 * 60;
-const DEFAULT_DATA_FILE = path.join(__dirname, 'database', 'data', 'nmData.json');
+const LEGACY_DATA_FILE = path.join(__dirname, 'database', 'data', 'nmData.json');
+function defaultDataFile(env = process.env) {
+  const railwayKeys = ['RAILWAY_ENVIRONMENT', 'RAILWAY_PROJECT_ID', 'RAILWAY_SERVICE_ID'];
+  const isProduction = railwayKeys.some(key => typeof env[key] === 'string' && env[key].trim() !== '') ||
+    !['development', 'test'].includes(env.NODE_ENV);
+  if (isProduction) return path.join('/data', 'alth-command-state', 'nmData.json');
+  if (env.NODE_ENV === 'test') return path.join(os.tmpdir(), `alth-nm-state-${process.pid}`, 'nmData.json');
+  return path.join(os.homedir(), '.alth-command-state', 'nmData.json');
+}
+const DEFAULT_DATA_FILE = defaultDataFile();
 const HELP = [
   'طريقة الاستخدام:',
   '/nm اسم المجموعة min max',
@@ -134,14 +144,18 @@ function readState(filePath) {
 
 function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
   const filePath = path.resolve(dataFile);
-  const state = readState(filePath);
+  const shouldMigrateLegacy = filePath === path.resolve(DEFAULT_DATA_FILE) &&
+    filePath !== path.resolve(LEGACY_DATA_FILE) &&
+    !fs.existsSync(filePath) && fs.existsSync(LEGACY_DATA_FILE);
+  const state = readState(shouldMigrateLegacy ? LEGACY_DATA_FILE : filePath);
   const timers = new Map();
   let activeApi = null;
 
   function persist() {
     const directory = path.dirname(filePath);
-    fs.mkdirSync(directory, { recursive: true });
-    const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    fs.chmodSync(directory, 0o700);
+    const temporaryPath = path.join(directory, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
     try {
       fs.writeFileSync(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
       fs.renameSync(temporaryPath, filePath);
@@ -158,6 +172,8 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
       }
     }
   }
+
+  if (shouldMigrateLegacy) persist();
 
   function clearTimer(threadID) {
     const timer = timers.get(String(threadID));
@@ -240,15 +256,14 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
         return true;
       }
       delete state.groups[threadID];
+      clearTimer(threadID);
       try {
         persist();
       } catch (error) {
-        state.groups[threadID] = previous;
-        await send(api, 'تعذر حفظ إيقاف القفل؛ لم يتغير الإعداد.', threadID);
+        await send(api, 'أُوقف القفل في هذه العملية، لكن تعذر حفظ الإيقاف الدائم؛ قد يعود بعد إعادة تشغيل الخدمة. تحقق من وحدة /data ثم أعد /nm off.', threadID);
         console.error('[الث /nm] تعذر حفظ ملف القفل:', error?.message || error);
         return true;
       }
-      clearTimer(threadID);
       await send(api, 'تم إيقاف قفل اسم المجموعة.', threadID);
       return true;
     }

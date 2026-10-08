@@ -129,7 +129,8 @@ const {
   loadCommands,
   handleMessage,
   handleEvent,
-  cancelActiveNameLoops,
+  pausePersistentCommands,
+  resumePersistentCommands,
   startNmCommand,
   stopNmCommand
 } = require('./main');
@@ -324,6 +325,8 @@ let botStartTime = Date.now();
 let msgCount = 0;
 let heartbeatInterval = null;
 let appstateSaverInterval = null;
+let memorySweeperInterval = null;
+let listenerErrorCount = 0;
 let lastReconnectRequest = 0;
 
 function requireDashboardAuth(req, res, next) {
@@ -498,7 +501,8 @@ function startHeartbeat(api) {
 }
 
 function startMemorySweeper(api) {
-  setInterval(() => {
+  if (memorySweeperInterval) clearInterval(memorySweeperInterval);
+  memorySweeperInterval = setInterval(() => {
     try {
       if (
         api &&
@@ -612,22 +616,26 @@ process.on('unhandledRejection', () => {
   scheduleRestart(15000);
 });
 
-process.on('SIGTERM', () => {
-  cancelActiveNameLoops();
+function shutdownForPlatformSignal(signal) {
+  pausePersistentCommands();
   stopNmTimers();
-  console.log(
-    '[الث] ⚠️ استلمت SIGTERM — البوت يكمل'
-  );
-});
+  if (msgEmitter && typeof msgEmitter.stop === 'function') {
+    try { msgEmitter.stop(); } catch {}
+  }
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  if (appstateSaverInterval) clearInterval(appstateSaverInterval);
+  if (memorySweeperInterval) clearInterval(memorySweeperInterval);
+  try { if (botApi) saveAppstate(botApi, 'قبل الإيقاف'); } catch {}
+  writeBotState(false, { status: 'إيقاف Railway لإعادة التشغيل' });
+  console.log(`[الث] استلمت ${signal}؛ حُفظت المهام الدورية وسيُنهى الاتصال لإعادة تشغيل الخدمة.`);
+  process.exit(0);
+}
 
+process.on('SIGTERM', () => shutdownForPlatformSignal('SIGTERM'));
 process.on('SIGHUP', () => {
-  cancelActiveNameLoops();
-  stopNmTimers();
-  console.log(
-    '[الث] ⚠️ استلمت SIGHUP — البوت يكمل'
-  );
+  console.log('[الث] استلمت SIGHUP؛ سيتم تجديد اتصال المستمع مع حفظ المهام الدورية.');
+  scheduleRestart(1000);
 });
-
 function startBot() {
   if (isRestarting) return;
 
@@ -768,6 +776,12 @@ function startBot() {
         console.error('[الث] تعذر استئناف قفل اسم المجموعة.');
       }
 
+      try {
+        resumePersistentCommands(api);
+      } catch {
+        console.error('[الث] تعذر استئناف بعض المهام الدورية المحفوظة.');
+      }
+
       startListening(api);
 
       startHeartbeat(api);
@@ -775,27 +789,6 @@ function startBot() {
       startMemorySweeper(api);
 
       startAppstateSaver(api);
-
-      try {
-        const {
-          commands
-        } = require('./main');
-
-        const wis =
-          commands.get('ويس');
-
-        if (
-          wis &&
-          typeof wis.resumeAll ===
-          'function'
-        ) {
-          wis.resumeAll(api);
-        }
-      } catch (e) {
-        console.error(
-          '[الث] خطأ في استئناف ويس (تفاصيل الخطأ محجوبة)'
-        );
-      }
 
       console.log(
         '[الث] 🤖 البوت "الث" يعمل — لا يتوقف أبداً 💀'
@@ -853,11 +846,6 @@ async function startListening(api) {
     const callback = (err, event) => {
 
       if (err) {
-
-        stopNmTimers();
-
-        cancelActiveNameLoops();
-
         console.error(
           '[الث] ⚠️ خطأ في الاستماع (تفاصيل الخطأ محجوبة)'
         );
@@ -868,32 +856,16 @@ async function startListening(api) {
           err
         );
 
-        /*
-         * هذا هو السطر الذي كان فيه الخطأ.
-         * تم إصلاحه بالكامل.
-         */
-
-        if (
-          errMsg.includes(
-            'Not logged in'
-          ) ||
-          errMsg.includes(
-            'sequence ID'
-          ) ||
-          errMsg.includes(
-            'appstate'
-          ) ||
-          errMsg.includes(
-            'Failed to get'
-          )
-        ) {
-          scheduleRestart(5000);
-        }
+        const requiresLongWait = /checkpoint|temporarily blocked|not logged in|appstate/i.test(errMsg);
+        const backoffDelay = Math.min(5000 * (2 ** Math.min(listenerErrorCount, 5)), 120000);
+        listenerErrorCount++;
+        scheduleRestart(requiresLongWait ? 5 * 60 * 1000 : backoffDelay);
 
         return;
       }
 
       if (!event) return;
+      listenerErrorCount = 0;
 
       try {
 
@@ -953,14 +925,13 @@ async function startListening(api) {
     );
 
   } catch (e) {
-
-    stopNmTimers();
-
     console.error(
       '[الث] ❌ استثناء في startListening (تفاصيل الخطأ محجوبة)'
     );
 
-    scheduleRestart(10000);
+    const backoffDelay = Math.min(5000 * (2 ** Math.min(listenerErrorCount, 5)), 120000);
+    listenerErrorCount++;
+    scheduleRestart(backoffDelay);
   }
 }
 
@@ -970,7 +941,7 @@ function scheduleRestart(delay) {
 
   isRestarting = true;
 
-  cancelActiveNameLoops();
+  pausePersistentCommands();
   stopNmTimers();
 
   try {
@@ -990,6 +961,13 @@ function scheduleRestart(delay) {
       );
 
       appstateSaverInterval = null;
+    }
+  } catch (e) {}
+
+  try {
+    if (memorySweeperInterval) {
+      clearInterval(memorySweeperInterval);
+      memorySweeperInterval = null;
     }
   } catch (e) {}
 
@@ -1014,7 +992,7 @@ function scheduleRestart(delay) {
         Number(delay) || 0,
         1000
       ),
-      120000
+      5 * 60 * 1000
     );
 
   reconnectAttempts++;
