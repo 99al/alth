@@ -87,6 +87,54 @@ test('production scheduled-command state resolves to the Railway volume', () => 
   assert.equal(resolveStatePath({ NODE_ENV: 'test', RAILWAY_PROJECT_ID: 'test-project' }), PRODUCTION_STATE_PATH);
 });
 
+test('ويس starts its loop before the start notice finishes sending', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const threadID = 'thread-wis-start-before-notice';
+  const command = fresh('./Commands/قصف.js');
+  command.cancelAll();
+  let finishStartNotice;
+  const { api, calls } = makeApi({
+    sendMessage(message) {
+      if (String(message).includes('جَـــارِي بَـــدْءُ')) {
+        return new Promise(resolve => { finishStartNotice = resolve; });
+      }
+    }
+  });
+  t.after(() => {
+    command.cancel(threadID);
+    command.pauseAll();
+    if (finishStartNotice) finishStartNotice();
+  });
+
+  const pendingStart = command.execute(api, { body: 'ويس', threadID });
+  await flushAsyncWork();
+  assert.equal(command.isActive(threadID), true);
+  assert.ok(calls.typing.some(({ active }) => active === true), 'the loop began while the notice was still pending');
+
+  finishStartNotice();
+  await pendingStart;
+});
+
+test('ويس restarts a saved but inactive run without falsely saying it is already running', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const threadID = 'thread-wis-stale-saved-state';
+  const initial = fresh('./Commands/قصف.js');
+  initial.cancelAll();
+  commandState.set('ويس', threadID, true);
+
+  const { api, calls } = makeApi();
+  const resumed = fresh('./Commands/قصف.js');
+  t.after(() => {
+    resumed.cancel(threadID);
+    resumed.pauseAll();
+  });
+
+  await resumed.execute(api, { body: 'ويس', threadID });
+  assert.equal(resumed.isActive(threadID), true);
+  assert.ok(calls.messages.some(({ message }) => message.includes('استئناف إرسال الجرائد')));
+  assert.equal(calls.messages.some(({ message }) => message.includes('الجرائد تعمل بالفعل')), false);
+});
+
 test('ويس resumes from saved state after a module reload and manual stop removes it permanently', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const threadID = 'thread-wis-persist';

@@ -7,8 +7,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "NODE_ENV=development node index.js",
-    "check": "node --check index.js && node --check main.js && node --check command-state.cjs && node --check nm-command.standalone.js && node --check Commands/mc.js && node --check Commands/جريد.js && node --check Commands/قصف.js && node --check Commands/رد.js && node --check Commands/هويه.js && node --check Commands/قروب.js && node -e 'new Function(require(\"fs\").readFileSync(String.raw`Commands/\\u0643\\u0627\\u062a\\u0634.js`, \"utf8\"))' && node --check name-loop-registry.cjs && node --check security.cjs && node --check fca-login.cjs && node --check persistent-commands.test.cjs",
-    "test": "node security.test.cjs && node name-loop-routing.test.cjs && node name-loop-katch.test.cjs && node nm-command.test.cjs && node mc-command.test.cjs && node auth-routes.test.cjs && node persistent-commands.test.cjs"
+    "check": "node --check index.js && node --check delayed-send-message.cjs && node --check delayed-send-message.test.cjs && node --check main.js && node --check command-state.cjs && node --check nm-command.standalone.js && node --check Commands/mc.js && node --check Commands/جريد.js && node --check Commands/قصف.js && node --check Commands/رد.js && node --check Commands/هويه.js && node --check Commands/قروب.js && node -e 'new Function(require(\"fs\").readFileSync(String.raw`Commands/\\u0643\\u0627\\u062a\\u0634.js`, \"utf8\"))' && node --check name-loop-registry.cjs && node --check security.cjs && node --check fca-login.cjs && node --check persistent-commands.test.cjs",
+    "test": "node delayed-send-message.test.cjs && node security.test.cjs && node name-loop-routing.test.cjs && node name-loop-katch.test.cjs && node nm-command.test.cjs && node mc-command.test.cjs && node auth-routes.test.cjs && node persistent-commands.test.cjs"
   },
   "dependencies": {
     "@dongdev/fca-unofficial": "4.0.3",
