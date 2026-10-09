@@ -99,9 +99,20 @@ function getTextForCycle(index) {
 const activeLoops = new Map();
 const commandState = require('../command-state.cjs').defaultStore;
 let _reqCounter = 0;
+const TYPING_TIMEOUT_MS = 30_000;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function withTimeout(promise, timeoutMs, label) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    Promise.resolve(promise).then(
+      value => { clearTimeout(timeout); resolve(value); },
+      error => { clearTimeout(timeout); reject(error); }
+    );
+  });
 }
 
 // دالة مخصصة للكتابة — تُجبر is_group_thread=1 لأن ws3-fca يكشف الجروب بطول >= 16
@@ -111,7 +122,7 @@ async function sendTyping(api, threadID, isTyping) {
     const mqttClient = api.ctx && api.ctx.mqttClient;
     if (!mqttClient) {
       // fallback للدالة الأصلية
-      await api.sendTypingIndicator(isTyping, threadID);
+      await withTimeout(api.sendTypingIndicator(threadID, isTyping), TYPING_TIMEOUT_MS, 'typing indicator');
       return;
     }
     const wsContent = {
@@ -129,17 +140,18 @@ async function sendTyping(api, threadID, isTyping) {
       request_id: ++_reqCounter,
       type: 4
     };
-    await new Promise((resolve, reject) =>
+    await withTimeout(new Promise((resolve, reject) =>
       mqttClient.publish('/ls_req', JSON.stringify(wsContent), {}, (err) => err ? reject(err) : resolve())
-    );
+    ), TYPING_TIMEOUT_MS, 'typing publish');
   } catch (e) {
     console.error(`[ويس] خطأ typing:`, e.message || e);
   }
 }
 
-async function spamLoop(api, threadID) {
+async function spamLoop(api, threadID, runToken) {
+  const isCurrentRun = () => activeLoops.get(threadID) === runToken;
   let cycleIndex = 0;
-  while (activeLoops.get(threadID)) {
+  while (isCurrentRun()) {
     try {
       const text = getTextForCycle(cycleIndex);
       const delay = getDelayForCycle(cycleIndex);
@@ -148,17 +160,19 @@ async function spamLoop(api, threadID) {
       const typingTime = 3000 + Math.floor(Math.random() * 3000);
       await sendTyping(api, threadID, true);
       await sleep(typingTime);
-      if (!activeLoops.get(threadID)) break;
+      if (!isCurrentRun()) break;
       await sendTyping(api, threadID, false);
+      if (!isCurrentRun()) break;
 
       await api.sendMessage(text, threadID);
+      if (!isCurrentRun()) break;
       console.log(`[ويس] ✍️ جريدة #${cycleIndex + 1} (كتابة ${(typingTime/1000).toFixed(1)}ث) | تأخير ${(delay/1000).toFixed(0)}ث`);
       await sleep(delay);
       cycleIndex++;
     } catch (e) {
       console.error(`[ويس] خطأ في الإرسال:`, e.message || e);
       await sendTyping(api, threadID, false);
-      if (!activeLoops.get(threadID)) break;
+      if (!isCurrentRun()) break;
       await sleep(5000);
     }
   }
@@ -166,10 +180,17 @@ async function spamLoop(api, threadID) {
 }
 
 function startLoop(api, threadID) {
-  if (activeLoops.get(threadID)) return false;
-  activeLoops.set(threadID, true);
-  void spamLoop(api, threadID).catch(() => {
+  const key = String(threadID);
+  if (activeLoops.has(key)) return false;
+  const runToken = Symbol(key);
+  activeLoops.set(key, runToken);
+  void spamLoop(api, key, runToken).catch(error => {
     console.error('[ويس] توقفت حلقة الإرسال بسبب خطأ غير متوقع.');
+    if (activeLoops.get(key) !== runToken) return;
+    activeLoops.delete(key);
+    try { commandState.remove('ويس', key); } catch {
+      console.error('[ويس] تعذر تنظيف حالة المهمة المتوقفة.');
+    }
   });
   return true;
 }
@@ -200,7 +221,7 @@ module.exports = {
     }
 
     if (body === 'ويس') {
-      if (activeLoops.get(threadID)) {
+      if (activeLoops.has(threadID)) {
         try { await api.sendMessage('⚠️ الجرائد تعمل بالفعل!', threadID); } catch (e) {}
         return;
       }
@@ -214,8 +235,11 @@ module.exports = {
       }
 
       if (savedState === true) {
-        startLoop(api, threadID);
-        try { await api.sendMessage('⚠️ الجرائد تعمل بالفعل!', threadID); } catch (e) {}
+        if (startLoop(api, threadID)) {
+          try { await api.sendMessage('🔄 تم استئناف إرسال الجرائد المحفوظة في هذه المحادثة.', threadID); } catch (e) {}
+        } else {
+          try { await api.sendMessage('⚠️ الجرائد تعمل بالفعل!', threadID); } catch (e) {}
+        }
         return;
       }
 
@@ -226,14 +250,14 @@ module.exports = {
         return;
       }
 
-      try { await api.sendMessage(SPAM_START, threadID); } catch (e) {}
       startLoop(api, threadID);
+      try { await api.sendMessage(SPAM_START, threadID); } catch (e) {}
     }
   },
 
   isActive(threadID) {
     const key = String(threadID);
-    if (activeLoops.get(key)) return true;
+    if (activeLoops.has(key)) return true;
     try { return commandState.get('ويس', key) === true; } catch { return false; }
   },
 
@@ -247,7 +271,7 @@ module.exports = {
     }
     let resumed = 0;
     for (const [threadID, enabled] of Object.entries(saved)) {
-      if (enabled !== true || activeLoops.get(threadID)) continue;
+      if (enabled !== true || activeLoops.has(threadID)) continue;
       console.log(`[ويس] استئناف الحلقة في ${threadID} بعد الاتصال`);
       startLoop(api, threadID);
       resumed++;
