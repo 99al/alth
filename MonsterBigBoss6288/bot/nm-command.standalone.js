@@ -232,7 +232,7 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
 
     if (!threadID) return true;
     if (!await hasPermission(api, event || {}, context)) {
-      await send(api, 'هذا الأمر مخصص للمشرفين.', threadID);
+      // Keep the command restricted without disclosing a response to non-admins.
       return true;
     }
 

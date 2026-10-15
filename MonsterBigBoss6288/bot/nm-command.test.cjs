@@ -39,7 +39,7 @@ test('nm authorization stays closed by default and accepts the supplied admin ch
 
   assert.equal(await command.execute(api, event), true);
   assert.equal(calls.titles.length, 0, 'unauthorized invocation cannot change the group name');
-  assert.ok(calls.messages.some(({ message }) => message.includes('مخصص للمشرفين')));
+  assert.deepEqual(calls.messages, [], 'unauthorized invocation stays silent');
 
   assert.equal(await command.execute(api, event, {
     isAdmin: senderID => senderID === 'member'
