@@ -52,6 +52,35 @@ test('nm authorization stays closed by default and accepts the supplied admin ch
   });
 });
 
+test('nmm profile accepts /nmm, rejects /nm, uses setTitle, and shows matching help', async t => {
+  const command = createNmCommand({
+    dataFile: makeTempDataFile(t),
+    isAuthorized: () => true,
+    commandName: 'nmm'
+  });
+  const { api, calls } = makeApi();
+
+  assert.equal(await command.execute(api, {
+    body: '/nm اسم غير مقصود 1 1',
+    threadID: 'thread-nmm',
+    senderID: 'admin'
+  }), false);
+  assert.equal(await command.execute(api, {
+    body: '/nmm اسم البوت الثاني 1 1',
+    threadID: 'thread-nmm',
+    senderID: 'admin'
+  }), true);
+  assert.deepEqual(calls.titles, [{ name: 'اسم البوت الثاني', threadID: 'thread-nmm' }]);
+
+  await command.execute(api, {
+    body: '/nmm تعليمات غير صالحة',
+    threadID: 'thread-nmm',
+    senderID: 'admin'
+  });
+  assert.ok(calls.messages.some(({ message }) => message.includes('/nmm اسم المجموعة min max')));
+  assert.equal(calls.messages.some(({ message }) => message.includes('/nm اسم المجموعة min max')), false);
+});
+
 test('nm persists settings, restores timers after start, and stops every timer on disconnect', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const dataFile = makeTempDataFile(t);

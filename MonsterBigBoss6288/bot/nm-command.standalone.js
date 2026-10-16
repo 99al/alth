@@ -29,14 +29,17 @@ function defaultDataFile(env = process.env) {
   return path.join(os.homedir(), '.alth-command-state', 'nmData.json');
 }
 const DEFAULT_DATA_FILE = defaultDataFile();
-const HELP = [
-  'طريقة الاستخدام:',
-  '/nm اسم المجموعة min max',
-  '/nm time min max',
-  '/nm status',
-  '/nm off',
-  'الأرقام بلا وحدة بالدقائق؛ أضيفي s للثواني أو m للدقائق. المدى حتى 24 ساعة.'
-].join('\n');
+function buildHelp(commandName) {
+  const command = `/${commandName}`;
+  return [
+    'طريقة الاستخدام:',
+    `${command} اسم المجموعة min max`,
+    `${command} time min max`,
+    `${command} status`,
+    `${command} off`,
+    'الأرقام بلا وحدة بالدقائق؛ أضيفي s للثواني أو m للدقائق. المدى حتى 24 ساعة.'
+  ].join('\n');
+}
 
 
 function isValidRange(minSeconds, maxSeconds) {
@@ -142,7 +145,13 @@ function readState(filePath) {
 }
 
 
-function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
+function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized, commandName = 'nm' } = {}) {
+  if (typeof commandName !== 'string' || !/^[a-z][a-z0-9_-]*$/iu.test(commandName)) {
+    throw new TypeError('commandName must be a simple slash-command name');
+  }
+  const command = `/${commandName}`;
+  const help = buildHelp(commandName);
+  const commandPattern = new RegExp(`^/${commandName}(?:\\s+([\\s\\S]*))?$`, 'iu');
   const filePath = path.resolve(dataFile);
   const shouldMigrateLegacy = filePath === path.resolve(DEFAULT_DATA_FILE) &&
     filePath !== path.resolve(LEGACY_DATA_FILE) &&
@@ -196,7 +205,7 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
       try {
         await activeApi.setTitle(entry.name, threadID);
       } catch (error) {
-        console.error('[الث /nm] تعذر إعادة اسم المجموعة للمحادثة ' + threadID + ':', error?.message || error);
+        console.error(`[الث ${command}] تعذر إعادة اسم المجموعة للمحادثة ${threadID}:`, error?.message || error);
       } finally {
         if (activeApi && state.groups[threadID] === entry) {
           schedule(threadID, entry);
@@ -227,7 +236,7 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
   async function execute(api, event, context = {}) {
     const threadID = String(event && event.threadID || '');
     const body = String(event && event.body || '').trim();
-    const match = body.match(/^\/nm(?:\s+([\s\S]*))?$/iu);
+    const match = body.match(commandPattern);
     if (!match) return false;
 
     if (!threadID) return true;
@@ -260,8 +269,8 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
       try {
         persist();
       } catch (error) {
-        await send(api, 'أُوقف القفل في هذه العملية، لكن تعذر حفظ الإيقاف الدائم؛ قد يعود بعد إعادة تشغيل الخدمة. تحقق من وحدة /data ثم أعد /nm off.', threadID);
-        console.error('[الث /nm] تعذر حفظ ملف القفل:', error?.message || error);
+        await send(api, `أُوقف القفل في هذه العملية، لكن تعذر حفظ الإيقاف الدائم؛ قد يعود بعد إعادة تشغيل الخدمة. تحقق من وحدة /data ثم أعد ${command} off.`, threadID);
+        console.error(`[الث ${command}] تعذر حفظ ملف القفل:`, error?.message || error);
         return true;
       }
       await send(api, 'تم إيقاف قفل اسم المجموعة.', threadID);
@@ -271,7 +280,7 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
     if (/^time\s+/iu.test(args)) {
       const timeMatch = args.match(/^time\s+(\d+(?:s|m)?)\s+(\d+(?:s|m)?)$/iu);
       if (!timeMatch) {
-        await send(api, HELP, threadID);
+        await send(api, help, threadID);
         return true;
       }
       const range = parseRange(timeMatch[1], timeMatch[2]);
@@ -282,7 +291,7 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
       const { minSeconds, maxSeconds } = range;
       const previous = state.groups[threadID];
       if (!previous) {
-        await send(api, 'فعّلي القفل أولًا: /nm اسم المجموعة min max', threadID);
+        await send(api, `فعّلي القفل أولًا: ${command} اسم المجموعة min max`, threadID);
         return true;
       }
       const updated = { ...previous, minSeconds, maxSeconds };
@@ -292,7 +301,7 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
       } catch (error) {
         state.groups[threadID] = previous;
         await send(api, 'تعذر حفظ الفاصل الجديد؛ بقي الإعداد السابق.', threadID);
-        console.error('[الث /nm] تعذر حفظ ملف القفل:', error?.message || error);
+        console.error(`[الث ${command}] تعذر حفظ ملف القفل:`, error?.message || error);
         return true;
       }
       if (activeApi) schedule(threadID, updated);
@@ -303,7 +312,7 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
 
     const nameMatch = args.match(/^(.+\S)\s+(\d+(?:s|m)?)\s+(\d+(?:s|m)?)$/u);
     if (!nameMatch) {
-      await send(api, HELP, threadID);
+      await send(api, help, threadID);
       return true;
     }
 
@@ -324,7 +333,7 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
       await api.setTitle(name, threadID);
     } catch (error) {
       await send(api, 'تعذر تغيير اسم المجموعة. تحققي من اتصال البوت وصلاحيته في المجموعة.', threadID);
-      console.error(`[الث /nm] تعذر تعيين الاسم للمحادثة ${threadID}:`, error?.message || error);
+      console.error(`[الث ${command}] تعذر تعيين الاسم للمحادثة ${threadID}:`, error?.message || error);
       return true;
     }
 
@@ -337,7 +346,7 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
       if (previous) state.groups[threadID] = previous;
       else delete state.groups[threadID];
       await send(api, 'تغيّر الاسم، لكن تعذر حفظ القفل محليًا؛ لن تُستأنف الحماية تلقائيًا بعد إعادة التشغيل.', threadID);
-      console.error('[الث /nm] تعذر حفظ ملف القفل:', error?.message || error);
+      console.error(`[الث ${command}] تعذر حفظ ملف القفل:`, error?.message || error);
       return true;
     }
 
@@ -378,11 +387,13 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized } = {}) {
   return { execute, start, stop, getStatus, getAllStatuses, dataFile: filePath };
 }
 
-const defaultCommand = createNmCommand();
+const { getBotCommandProfile } = require('./bot-command-profile.cjs');
+const defaultProfile = getBotCommandProfile();
+const defaultCommand = createNmCommand({ commandName: defaultProfile.nm.commandName });
 
 module.exports = {
-  name: 'nm',
-  aliases: ['namemute', 'غلق', 'lockname'],
+  name: defaultProfile.nm.commandName,
+  aliases: [...defaultProfile.nm.aliases],
   author: 'الث',
   description: 'قفل اسم المجموعة وإعادته دوريًا — إعداد محلي مستقل',
   execute: (...args) => defaultCommand.execute(...args),

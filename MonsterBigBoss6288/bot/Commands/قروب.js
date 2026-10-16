@@ -25,7 +25,11 @@ async function getCurrentGroupName(api, threadID) {
 
 async function changeGroupName(api, threadID, groupName) {
   try {
-    await api.gcname(groupName, threadID);
+    if (!api || typeof api.setTitle !== 'function') {
+      console.error('[قروب] واجهة setTitle غير متاحة في اتصال البوت.');
+      return false;
+    }
+    await api.setTitle(groupName, threadID);
     return true;
   } catch {
     console.error('[قروب] تعذر تغيير اسم المجموعة؛ ستستمر الحماية في المحاولة.');

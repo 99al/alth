@@ -1,6 +1,10 @@
 const activeSchedules = new Map();
 const pendingSleeps = new Map();
 const commandState = require('../command-state.cjs').defaultStore;
+const { getBotCommandProfile } = require('../bot-command-profile.cjs');
+const commandProfile = getBotCommandProfile();
+const commandName = commandProfile.jareed.commandName;
+const commandAliases = [...commandProfile.jareed.aliases];
 
 const MAX_DELAY_SECONDS = 24 * 60 * 60;
 
@@ -27,13 +31,15 @@ function cancelSleep(threadID) {
 }
 
 function getCommandArguments(body) {
-  if (body === 'جريد' || body === 'جريد البوت') return '';
-  if (body.startsWith('جريد البوت ')) return body.slice('جريد البوت '.length).trim();
-  if (body.startsWith('جريد ')) return body.slice('جريد '.length).trim();
+  const names = [commandName, ...commandAliases].sort((left, right) => right.length - left.length);
+  for (const name of names) {
+    if (body === name) return '';
+    if (body.startsWith(`${name} `)) return body.slice(name.length).trim();
+  }
   return null;
 }
 
-function parseSchedule(body) {
+function parseSchedule(body, displayName = commandName) {
   const args = getCommandArguments(body);
   if (args === null) return null;
 
@@ -41,7 +47,7 @@ function parseSchedule(body) {
   if (stop) return { stop: true };
 
   const match = args.match(/^(\d+)\s+(\d+)\s+([\s\S]+)$/);
-  if (!match) return { error: '⚠️ الصيغة: جريد 10 15 نص الرسالة' };
+  if (!match) return { error: `⚠️ الصيغة: ${displayName} 10 15 نص الرسالة` };
 
   const minSeconds = Number(match[1]);
   const maxSeconds = Number(match[2]);
@@ -68,7 +74,7 @@ function randomDelay(minSeconds, maxSeconds) {
   return (minSeconds + Math.floor(Math.random() * range)) * 1000;
 }
 
-async function runSchedule(api, threadID, schedule) {
+async function runSchedule(api, threadID, schedule, displayName = commandName) {
   while (activeSchedules.get(threadID) === schedule) {
     const delay = randomDelay(schedule.minSeconds, schedule.maxSeconds);
     const elapsed = await sleep(delay, threadID);
@@ -77,21 +83,21 @@ async function runSchedule(api, threadID, schedule) {
     try {
       await api.sendMessage(schedule.message, threadID);
       console.log(
-        `[جريد] ✅ أُرسلت رسالة مجدولة إلى ${threadID} بعد ${(delay / 1000).toFixed(0)}ث`
+        `[${displayName}] ✅ أُرسلت رسالة مجدولة إلى ${threadID} بعد ${(delay / 1000).toFixed(0)}ث`
       );
     } catch {
-      console.error('[جريد] تعذر إرسال الرسالة المجدولة؛ ستستمر المحاولة في الدورة التالية.');
+      console.error(`[${displayName}] تعذر إرسال الرسالة المجدولة؛ ستستمر المحاولة في الدورة التالية.`);
     }
   }
 
-  console.log(`[جريد] ⏹️ توقفت الجدولة في ${threadID}`);
+  console.log(`[${displayName}] ⏹️ توقفت الجدولة في ${threadID}`);
 }
 
-function startSchedule(api, threadID, schedule) {
+function startSchedule(api, threadID, schedule, displayName = commandName) {
   cancelSleep(threadID);
   activeSchedules.set(threadID, schedule);
-  void runSchedule(api, threadID, schedule).catch(() => {
-    console.error('[جريد] توقفت الجدولة بسبب خطأ غير متوقع.');
+  void runSchedule(api, threadID, schedule, displayName).catch(() => {
+    console.error(`[${displayName}] توقفت الجدولة بسبب خطأ غير متوقع.`);
   });
 }
 
@@ -106,14 +112,14 @@ function isValidSavedSchedule(schedule) {
 }
 
 module.exports = {
-  name: 'جريد',
-  aliases: ['جريد البوت', 'جرائد'],
+  name: commandName,
+  aliases: commandAliases,
   description: 'إرسال رسالة متكررة بزمن عشوائي حتى إيقافها يدويًا',
 
   async execute(api, event) {
     const threadID = String(event.threadID);
     const body = (event.body || '').trim();
-    const parsed = parseSchedule(body);
+    const parsed = parseSchedule(body, commandName);
     if (!parsed) return;
 
     if (parsed.stop) {
@@ -124,11 +130,11 @@ module.exports = {
       try {
         wasSaved = commandState.remove('جريد', threadID);
       } catch {
-        await api.sendMessage('⏹️ أُوقف الإرسال في هذه العملية، لكن تعذر حفظ الإيقاف الدائم. أعد «جريد ايقاف» بعد عودة التخزين.', threadID);
+        await api.sendMessage(`⏹️ أُوقف الإرسال في هذه العملية، لكن تعذر حفظ الإيقاف الدائم. أعد «${commandName} ايقاف» بعد عودة التخزين.`, threadID);
         return;
       }
       if (wasActive || wasSaved) {
-        await api.sendMessage('✅ تم إيقاف جريد البوت في هذه المحادثة.', threadID);
+        await api.sendMessage(`✅ تم إيقاف ${commandName} البوت في هذه المحادثة.`, threadID);
       } else {
         await api.sendMessage('⚠️ لا توجد جدولة مفعّلة في هذه المحادثة.', threadID);
       }
@@ -142,7 +148,7 @@ module.exports = {
 
     if (activeSchedules.has(threadID)) {
       await api.sendMessage(
-        '⚠️ توجد جدولة مفعّلة بالفعل. أرسل «جريد ايقاف» أولًا لتغييرها.',
+        `⚠️ توجد جدولة مفعّلة بالفعل. أرسل «${commandName} ايقاف» أولًا لتغييرها.`,
         threadID
       );
       return;
@@ -152,12 +158,12 @@ module.exports = {
     try {
       savedSchedule = commandState.get('جريد', threadID);
     } catch {
-      await api.sendMessage('❌ تعذر قراءة حالة جريد من التخزين الدائم.', threadID);
+      await api.sendMessage(`❌ تعذر قراءة حالة ${commandName} من التخزين الدائم.`, threadID);
       return;
     }
     if (savedSchedule) {
-      if (isValidSavedSchedule(savedSchedule)) startSchedule(api, threadID, savedSchedule);
-      await api.sendMessage('⚠️ توجد جدولة محفوظة بالفعل. أرسل «جريد ايقاف» أولًا لتغييرها.', threadID);
+      if (isValidSavedSchedule(savedSchedule)) startSchedule(api, threadID, savedSchedule, commandName);
+      await api.sendMessage(`⚠️ توجد جدولة محفوظة بالفعل. أرسل «${commandName} ايقاف» أولًا لتغييرها.`, threadID);
       return;
     }
 
@@ -169,13 +175,13 @@ module.exports = {
     try {
       commandState.set('جريد', threadID, schedule);
     } catch {
-      await api.sendMessage('❌ تعذر حفظ جدول جريد؛ لم يبدأ الإرسال.', threadID);
+      await api.sendMessage(`❌ تعذر حفظ جدول ${commandName}؛ لم يبدأ الإرسال.`, threadID);
       return;
     }
 
-    startSchedule(api, threadID, schedule);
+    startSchedule(api, threadID, schedule, commandName);
     await api.sendMessage(
-      `✅ تم تشغيل جريد البوت.\n🎲 الإرسال كل مدة عشوائية بين ${schedule.minSeconds} و${schedule.maxSeconds} ثانية، ويستمر حتى إيقافه يدويًا.\n⏹️ للإيقاف: جريد ايقاف`,
+      `✅ تم تشغيل ${commandName} البوت.\n🎲 الإرسال كل مدة عشوائية بين ${schedule.minSeconds} و${schedule.maxSeconds} ثانية، ويستمر حتى إيقافه يدويًا.\n⏹️ للإيقاف: ${commandName} ايقاف`,
       threadID
     );
   },
@@ -191,13 +197,13 @@ module.exports = {
     try {
       saved = commandState.getAll('جريد');
     } catch {
-      console.error('[جريد] تعذر قراءة الجداول المحفوظة لاستئنافها.');
+      console.error(`[${commandName}] تعذر قراءة الجداول المحفوظة لاستئنافها.`);
       return 0;
     }
     let resumed = 0;
     for (const [threadID, schedule] of Object.entries(saved)) {
       if (!isValidSavedSchedule(schedule) || activeSchedules.has(threadID)) continue;
-      startSchedule(api, threadID, schedule);
+      startSchedule(api, threadID, schedule, commandName);
       resumed++;
     }
     return resumed;

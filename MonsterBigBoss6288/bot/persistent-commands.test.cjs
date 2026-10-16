@@ -1,10 +1,12 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { getBotCommandProfile } = require('./bot-command-profile.cjs');
 
 process.env.NODE_ENV = 'test';
 process.env.ALTH_COMMAND_STATE_PATH = path.join(os.tmpdir(), `alth-persistent-commands-${process.pid}`, 'state.json');
@@ -42,9 +44,9 @@ function makeApi(overrides = {}) {
       calls.nicknames.push({ nickname, threadID: String(threadID), userID: String(userID) });
       if (overrides.nickname) return overrides.nickname(nickname, threadID, userID, calls);
     },
-    async gcname(name, threadID) {
+    async setTitle(name, threadID) {
       calls.groupNames.push({ name, threadID: String(threadID) });
-      if (overrides.gcname) return overrides.gcname(name, threadID, calls);
+      if (overrides.setTitle) return overrides.setTitle(name, threadID, calls);
     },
     async sendTypingIndicator(threadID, active) {
       calls.typing.push({ threadID: String(threadID), active });
@@ -258,27 +260,95 @@ test('رد rules survive command reload and continue replying', async t => {
   assert.equal(commandState.get('رد', threadID), undefined);
 });
 
-test('dispatcher routes جريد, legacy جرائد, and اومر', async () => {
+test('dispatcher keeps the first-bot commands and routes renamed commands only in the second profile', async () => {
   const { handleMessage, loadCommands, commands } = require('./main');
-  const dispatched = [];
-  const commandsForTest = new Map([
-    ['جريد', { execute: (_api, event) => dispatched.push(event.body) }],
-    ['اومر', { execute: (_api, event) => dispatched.push(event.body) }]
-  ]);
+  const firstProfile = getBotCommandProfile({ BOT_COMMAND_PROFILE: 'first' });
+  const secondProfile = getBotCommandProfile({ BOT_COMMAND_PROFILE: 'second' });
   const { api } = makeApi();
-  const dependencies = { commands: commandsForTest, isAdmin: () => true, isCommandEnabled: () => true };
-  await handleMessage(api, { body: 'جريد 2 4 رسالة', threadID: 'route', senderID: 'admin' }, dependencies);
-  await handleMessage(api, { body: 'جرائد 2 4 رسالة', threadID: 'route', senderID: 'admin' }, dependencies);
-  await handleMessage(api, { body: 'اومر', threadID: 'route', senderID: 'admin' }, dependencies);
-  assert.deepEqual(dispatched, ['جريد 2 4 رسالة', 'جريد 2 4 رسالة', 'اومر']);
+  const makeDependencies = (profile, dispatched) => ({
+    commandProfile: profile,
+    commands: new Map([
+      [profile.nm.commandName, { execute: (_api, event) => dispatched.push(`nm:${event.body}`) }],
+      [profile.jareed.commandName, { execute: (_api, event) => dispatched.push(`jareed:${event.body}`) }],
+      ['اومر', { execute: (_api, event) => dispatched.push(`help:${event.body}`) }]
+    ]),
+    isAdmin: () => true,
+    isCommandEnabled: () => true
+  });
+
+  const firstDispatched = [];
+  const firstDependencies = makeDependencies(firstProfile, firstDispatched);
+  for (const body of ['/nm status', '/nmm status', 'جريد 2 4 رسالة', 'جرائد 2 4 رسالة', 'جريدة 2 4 رسالة', 'اومر']) {
+    await handleMessage(api, { body, threadID: 'route-first', senderID: 'admin' }, firstDependencies);
+  }
+  assert.deepEqual(firstDispatched, [
+    'nm:/nm status',
+    'jareed:جريد 2 4 رسالة',
+    'jareed:جريد 2 4 رسالة',
+    'help:اومر'
+  ]);
+
+  const secondDispatched = [];
+  const secondDependencies = makeDependencies(secondProfile, secondDispatched);
+  for (const body of ['/nmm status', '/nm status', 'جريدة 2 4 رسالة', 'جريد 2 4 رسالة', 'اومر']) {
+    await handleMessage(api, { body, threadID: 'route-second', senderID: 'admin' }, secondDependencies);
+  }
+  assert.deepEqual(secondDispatched, [
+    'nm:/nmm status',
+    'jareed:جريدة 2 4 رسالة',
+    'help:اومر'
+  ]);
 
   loadCommands();
+  assert.ok(commands.has('nm'), 'the default first-bot registry keeps nm');
   const helpApi = makeApi();
   await handleMessage(helpApi.api, { body: 'اومر', threadID: 'help', senderID: 'admin' }, {
     commands,
+    commandProfile: firstProfile,
     isAdmin: () => true,
     isCommandEnabled: () => true
   });
   await flushAsyncWork();
   assert.ok(helpApi.calls.messages.some(({ message }) => message.includes('جريد')));
+});
+
+test('second BOT_COMMAND_PROFILE loads nmm and جريدة as registered names without the first-bot spellings', () => {
+  const env = {
+    ...process.env,
+    NODE_ENV: 'test',
+    BOT_COMMAND_PROFILE: 'second',
+    ALTH_COMMAND_STATE_PATH: path.join(os.tmpdir(), `alth-second-profile-${process.pid}`, 'state.json')
+  };
+  const script = [
+    "const { loadCommands, commands, handleMessage } = require('./main');",
+    'loadCommands();',
+    'const messages = [];',
+    'const titles = [];',
+    "const api = { sendMessage: async message => messages.push(message), setTitle: async (name, threadID) => titles.push({ name, threadID }) };",
+    'const dependencies = { isAdmin: () => true, isCommandEnabled: () => true };',
+    "Promise.resolve().then(() => handleMessage(api, { body: '/nmm اسم البوت الثاني 1 1', threadID: 'new-nm', senderID: 'admin' }, dependencies))",
+    "  .then(() => handleMessage(api, { body: '/nm اسم قديم 1 1', threadID: 'old-nm', senderID: 'admin' }, dependencies))",
+    "  .then(() => handleMessage(api, { body: 'جريد', threadID: 'old-jareed', senderID: 'admin' }, dependencies))",
+    "  .then(() => handleMessage(api, { body: 'جريدة', threadID: 'new-jareed', senderID: 'admin' }, dependencies))",
+    '  .then(() => {',
+    "    process.stdout.write('PROFILE_RESULT:' + JSON.stringify({ names: [...commands.keys()], commandName: commands.get('جريدة').name, titles, messages }));",
+    '}).catch(error => { console.error(error); process.exitCode = 1; });'
+  ].join('\n');
+  const output = execFileSync(process.execPath, ['-e', script], {
+    cwd: __dirname,
+    env,
+    encoding: 'utf8'
+  });
+  const result = output.match(/PROFILE_RESULT:(\{[^\n]+\})/);
+  assert.ok(result, 'child process reports the loaded profile command names');
+  const report = JSON.parse(result[1]);
+  assert.ok(report.names.includes('nmm'));
+  assert.ok(report.names.includes('جريدة'));
+  assert.equal(report.names.includes('nm'), false);
+  assert.equal(report.names.includes('جريد'), false);
+  assert.equal(report.commandName, 'جريدة');
+  assert.deepEqual(report.titles, [{ name: 'اسم البوت الثاني', threadID: 'new-nm' }]);
+  assert.equal(report.messages.length, 2, 'the old /nm and جريد spellings are ignored in the second profile');
+  assert.ok(report.messages.some(message => message.includes('قفل الاسم')));
+  assert.ok(report.messages.some(message => message.includes('الصيغة: جريدة 10 15 نص الرسالة')));
 });

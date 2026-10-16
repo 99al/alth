@@ -36,9 +36,9 @@ function makeApi(overrides = {}) {
       calls.nicknames.push({ nickname, threadID: String(threadID), userID: String(userID) });
       if (overrides.nickname) return overrides.nickname(nickname, threadID, userID);
     },
-    async gcname(groupName, threadID) {
+    async setTitle(groupName, threadID) {
       calls.groupNames.push({ groupName, threadID: String(threadID) });
-      if (overrides.gcname) return overrides.gcname(groupName, threadID);
+      if (overrides.setTitle) return overrides.setTitle(groupName, threadID);
     }
   };
   return { api, calls };

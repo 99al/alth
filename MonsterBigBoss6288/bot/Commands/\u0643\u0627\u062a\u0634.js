@@ -101,10 +101,10 @@ async function restoreSavedState(api, threadID, entry) {
     if ((entry.nickname || entry.groupName || entry.delayedGroup) && typeof api.getThreadInfo === 'function') {
       const info = await api.getThreadInfo(threadID);
       if (!activeRuns.isActive(run)) return false;
-      if ((entry.groupName || entry.delayedGroup) && typeof api.gcname === 'function') {
+      if ((entry.groupName || entry.delayedGroup) && typeof api.setTitle === 'function') {
         const target = entry.groupName || entry.delayedGroup.name;
         const current = info && (info.threadName || info.name);
-        if (typeof current === 'string' && current !== target) await api.gcname(target, threadID);
+        if (typeof current === 'string' && current !== target) await api.setTitle(target, threadID);
       }
       if (entry.nickname && Array.isArray(info && info.participantIDs) && info.nicknames && typeof api.nickname === 'function') {
         let attemptedWrites = 0;
@@ -218,7 +218,7 @@ module.exports = {
         return;
       }
       try {
-        await api.gcname(groupName, threadID);
+        await api.setTitle(groupName, threadID);
         await api.sendMessage(`✅ تم تغيير اسم المجموعة إلى: ${groupName}\n🛡️ الحماية مستمرة حتى إيقافها يدويًا.`, threadID);
       } catch {
         console.error('[كاتش] تعذر تطبيق اسم المجموعة.');
@@ -247,7 +247,7 @@ module.exports = {
         return;
       }
       try {
-        await api.gcname(groupName, threadID);
+        await api.setTitle(groupName, threadID);
         await api.sendMessage(`✅ تم تغيير اسم المجموعة إلى: ${groupName}\n🛡️ الحماية مستمرة حتى إيقافها يدويًا.`, threadID);
       } catch {
         console.error('[كاتش] تعذر تطبيق اسم المجموعة.');
@@ -283,7 +283,7 @@ module.exports = {
       const delayMs = delayedConfig.minMs + Math.floor(Math.random() * (delayedConfig.maxMs - delayedConfig.minMs));
       scheduleThreadTimeout(threadID, async () => {
         if (protectedGroupNames2.get(threadID) !== delayedConfig) return;
-        try { await api.gcname(delayedConfig.name, threadID); } catch {
+        try { await api.setTitle(delayedConfig.name, threadID); } catch {
           console.error('[كاتش] تعذرت إعادة اسم المجموعة المحمي.');
         }
       }, delayMs);
@@ -295,7 +295,7 @@ module.exports = {
     if (!newName || newName === protectedName) return;
     scheduleThreadTimeout(threadID, async () => {
       if (protectedGroupNames.get(threadID) !== protectedName) return;
-      try { await api.gcname(protectedName, threadID); } catch {
+      try { await api.setTitle(protectedName, threadID); } catch {
         console.error('[كاتش] تعذرت إعادة اسم المجموعة المحمي.');
       }
     }, 300);

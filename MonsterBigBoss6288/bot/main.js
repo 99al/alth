@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const nmCommand = require('./nm-command.standalone');
+const { getBotCommandProfile } = require('./bot-command-profile.cjs');
+const serviceCommandProfile = getBotCommandProfile();
 
 // ─── قراءة المشرفين من ملف admins-config.json ───
 function loadAdmins(configPath = path.join(__dirname, 'admins-config.json')) {
@@ -63,7 +65,7 @@ function loadCommands() {
     console.error('[الث] تعذر تحميل الأوامر.');
 
     commandRegistry.clear();
-    commandRegistry.set('nm', nmCommand);
+    commandRegistry.set(serviceCommandProfile.nm.commandName, nmCommand);
     return;
   }
 
@@ -94,7 +96,7 @@ function loadCommands() {
     }
   }
 
-  commandRegistry.set('nm', nmCommand);
+  commandRegistry.set(serviceCommandProfile.nm.commandName, nmCommand);
 
   console.log('[الث] اكتمل تحميل الأوامر.');
 }
@@ -135,6 +137,7 @@ async function handleMessage(api, event, dependencies = {}) {
   const commands = dependencies.commands || commandRegistry;
   const canAdmin = dependencies.isAdmin || isAdmin;
   const commandEnabled = dependencies.isCommandEnabled || isCommandEnabled;
+  const commandProfile = dependencies.commandProfile || serviceCommandProfile;
 
   const body = String(event.body || '').trim();
 
@@ -239,12 +242,12 @@ async function handleMessage(api, event, dependencies = {}) {
   }
 
   // ─── أمر قفل اسم المجموعة ───
-  if (/^\/nm(?:\s|$)/iu.test(body)) {
-    if (!commandEnabled('nm')) {
+  if (new RegExp(`^/${commandProfile.nm.commandName}(?:\\s|$)`, 'iu').test(body)) {
+    if (!commandEnabled(commandProfile.nm.commandName)) {
       return;
     }
 
-    const cmd = commands.get('nm');
+    const cmd = commands.get(commandProfile.nm.commandName);
     if (cmd && typeof cmd.execute === 'function') {
       Promise.resolve(cmd.execute(api, event, { isAdmin: canAdmin }))
         .catch(() => console.error('[الث] تعذر تنفيذ أمر قفل اسم المجموعة.'));
@@ -350,28 +353,31 @@ async function handleMessage(api, event, dependencies = {}) {
     return;
   }
 
-  // ─── أمر جريد مع إبقاء جرائد كاسم بديل ───
-  if (/^(?:جريد|جرائد)(?:\s|$)/u.test(body)) {
+  // ─── أمر جدولة الرسائل بحسب ملف الخدمة ───
+  const jareedNames = [commandProfile.jareed.commandName, ...commandProfile.jareed.aliases]
+    .sort((left, right) => right.length - left.length);
+  const matchedJareedName = jareedNames.find(name => body === name || body.startsWith(`${name} `));
+  if (matchedJareedName) {
     if (!canAdmin(senderID)) {
       return;
     }
 
-    if (!commandEnabled('جريد')) {
+    if (!commandEnabled(commandProfile.jareed.commandName)) {
       return;
     }
 
-    const cmd = commands.get('جريد');
+    const cmd = commands.get(commandProfile.jareed.commandName);
 
     if (
       cmd &&
       typeof cmd.execute === 'function'
     ) {
-      const commandEvent = body.startsWith('جرائد')
-        ? { ...event, body: body.replace(/^جرائد(?=\s|$)/u, 'جريد') }
-        : event;
+      const commandEvent = matchedJareedName === commandProfile.jareed.commandName
+        ? event
+        : { ...event, body: `${commandProfile.jareed.commandName}${body.slice(matchedJareedName.length)}` };
       Promise.resolve(
         cmd.execute(api, commandEvent)
-      ).catch(() => console.error('[الث] تعذر تنفيذ أمر جريد.'));
+      ).catch(() => console.error('[الث] تعذر تنفيذ أمر الجدولة.'));
     }
 
     return;
@@ -519,7 +525,7 @@ function cancelActiveNameLoops(threadID, commandMap = commandRegistry, options =
 
 function pausePersistentCommands(commandMap = commandRegistry) {
   let paused = 0;
-  for (const name of ['ويس', 'جريد', 'هويه', 'قروب', 'كاتش']) {
+  for (const name of ['ويس', serviceCommandProfile.jareed.commandName, 'هويه', 'قروب', 'كاتش']) {
     const command = commandMap.get(name);
     if (!command || typeof command.pauseAll !== 'function') continue;
     try {
@@ -535,7 +541,7 @@ function pausePersistentCommands(commandMap = commandRegistry) {
 
 function resumePersistentCommands(api, commandMap = commandRegistry) {
   let resumed = 0;
-  for (const name of ['ويس', 'جريد', 'هويه', 'قروب', 'كاتش']) {
+  for (const name of ['ويس', serviceCommandProfile.jareed.commandName, 'هويه', 'قروب', 'كاتش']) {
     const command = commandMap.get(name);
     if (!command || typeof command.resumeAll !== 'function') continue;
     try {

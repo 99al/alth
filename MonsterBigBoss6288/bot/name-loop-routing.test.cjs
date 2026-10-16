@@ -75,11 +75,11 @@ function makeApi(overrides = {}) {
       threadNicknames.set(memberID, nickname);
       if (overrides.nickname) return overrides.nickname(nickname, threadID, memberID);
     },
-    async gcname(groupName, threadID) {
+    async setTitle(groupName, threadID) {
       const key = String(threadID);
       calls.groupNames.push({ groupName, threadID: key });
       groupNamesByThread.set(key, groupName);
-      if (overrides.gcname) return overrides.gcname(groupName, threadID);
+      if (overrides.setTitle) return overrides.setTitle(groupName, threadID);
     }
   };
 
