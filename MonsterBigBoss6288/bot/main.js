@@ -151,6 +151,7 @@ async function handleMessage(api, event, dependencies = {}) {
 
   // ─── قائمة الأوامر ───
   if (/^(?:اومر|أوامر)(?:\s|$)/u.test(body)) {
+    if (!canAdmin(senderID)) return;
     if (!commandEnabled('اومر')) return;
     const cmd = commands.get('اومر');
     if (cmd && typeof cmd.execute === 'function') {
