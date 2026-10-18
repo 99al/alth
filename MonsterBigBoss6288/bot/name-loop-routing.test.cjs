@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -111,26 +112,22 @@ function allNameCommands() {
   ]);
 }
 
-test('dispatcher routes هويه, alias هوية, and قروب to their loaded commands', async () => {
+test('dispatcher routes هويه and alias هوية to their loaded command', async () => {
   const dispatched = [];
   const commands = new Map([
-    ['هويه', { execute: (_api, event) => dispatched.push(['nickname', event.body]) }],
-    ['قروب', { execute: (_api, event) => dispatched.push(['group', event.body]) }]
+    ['هويه', { execute: (_api, event) => dispatched.push(['nickname', event.body]) }]
   ]);
   const api = { sendMessage: async () => {} };
 
   await handleMessage(api, { body: 'هويه لقب', threadID: 't-1', senderID: 'admin' }, dependencies(commands));
   await handleMessage(api, { body: 'هوية لقب', threadID: 't-1', senderID: 'admin' }, dependencies(commands));
-  await handleMessage(api, { body: 'قروب اسم جديد', threadID: 't-1', senderID: 'admin' }, dependencies(commands));
-
   assert.deepEqual(dispatched, [
     ['nickname', 'هويه لقب'],
-    ['nickname', 'هوية لقب'],
-    ['group', 'قروب اسم جديد']
+    ['nickname', 'هوية لقب']
   ]);
 });
 
-test('مجموعة aliases قروب while مجموعة 2 keeps its legacy Katch behavior', async t => {
+test('قروب لا يوجه أمراً، مع بقاء صيغة مجموعة 2 في كاتش', async t => {
   const dispatched = [];
   const legacyThread = 'thread-legacy-group2';
   t.after(() => katchCommand.getProtectedGroupNames2().delete(legacyThread));
@@ -141,7 +138,6 @@ test('مجموعة aliases قروب while مجموعة 2 keeps its legacy Katch 
   const { api, calls } = makeApi();
 
   await dispatch(api, commands, 'قروب اسم محمي', 'thread-alias');
-  await dispatch(api, commands, 'مجموعة اسم محمي', 'thread-alias');
 
   const originalReadFileSync = fs.readFileSync;
   fs.readFileSync = function (file, ...args) {
@@ -165,10 +161,7 @@ test('مجموعة aliases قروب while مجموعة 2 keeps its legacy Katch 
     fs.readFileSync = originalReadFileSync;
   }
 
-  assert.deepEqual(dispatched, [
-    { name: 'قروب', body: 'قروب اسم محمي' },
-    { name: 'قروب', body: 'قروب اسم محمي' }
-  ]);
+  assert.deepEqual(dispatched, []);
   assert.deepEqual(calls.groupNames, [
     { groupName: 'اسم سابق', threadID: legacyThread }
   ]);
@@ -177,6 +170,29 @@ test('مجموعة aliases قروب while مجموعة 2 keeps its legacy Katch 
     minMs: 3_000,
     maxMs: 5_000
   });
+});
+
+test('كل BOT_COMMAND_PROFILE لا يسجل ولا يوجه قروب ويحافظ على أوامر الخدمة', () => {
+  const script = [
+    "const { loadCommands, commands, handleMessage } = require('./main');",
+    "const { getBotCommandProfile } = require('./bot-command-profile.cjs');",
+    'loadCommands();',
+    'const profile = getBotCommandProfile();',
+    "const calls = [];",
+    "const commandMap = new Map([['قروب', { execute: () => calls.push('قروب') }], [profile.nm.commandName, { execute: () => calls.push(profile.nm.commandName) }], [profile.jareed.commandName, { execute: () => calls.push(profile.jareed.commandName) }]]);",
+    "const api = { sendMessage: async () => {} };",
+    "Promise.resolve(handleMessage(api, { body: 'قروب اسم', threadID: 'profile-test', senderID: 'admin' }, { commands: commandMap, isAdmin: () => true, isCommandEnabled: () => true })).then(() => handleMessage(api, { body: 'مجموعة اسم', threadID: 'profile-test', senderID: 'admin' }, { commands: commandMap, isAdmin: () => true, isCommandEnabled: () => true })).then(() => console.log(JSON.stringify({ registered: commands.has('قروب'), calls })));"
+  ].join('\n');
+
+  for (const profile of ['first', 'second']) {
+    const output = execFileSync(process.execPath, ['-e', script], {
+      cwd: __dirname,
+      env: { ...process.env, NODE_ENV: 'test', BOT_COMMAND_PROFILE: profile },
+      encoding: 'utf8'
+    });
+    const result = output.trim().split('\n').find(line => line.startsWith('{'));
+    assert.deepEqual(JSON.parse(result), { registered: false, calls: [] }, profile);
+  }
 });
 
 test('إيقاف الاسم cancels nickname and group-name loops only in the current thread', async t => {
@@ -191,8 +207,9 @@ test('إيقاف الاسم cancels nickname and group-name loops only in the cu
 
   await dispatch(api, commands, 'هويه لقب أ', 'thread-a');
   await dispatch(api, commands, 'هويه لقب ب', 'thread-b');
-  await dispatch(api, commands, 'قروب اسم أ', 'thread-a');
-  await dispatch(api, commands, 'قروب اسم ب', 'thread-b');
+  groupCommand.execute(api, { body: 'قروب اسم أ', threadID: 'thread-a' });
+  groupCommand.execute(api, { body: 'قروب اسم ب', threadID: 'thread-b' });
+  await flushAsyncWork();
   await dispatch(api, commands, 'إيقاف الاسم', 'thread-a');
 
   assert.ok(calls.messages.some(({ message, threadID }) =>
