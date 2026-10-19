@@ -158,7 +158,43 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized, commandNa
     !fs.existsSync(filePath) && fs.existsSync(LEGACY_DATA_FILE);
   const state = readState(shouldMigrateLegacy ? LEGACY_DATA_FILE : filePath);
   const timers = new Map();
+  const pendingTitles = new Set();
+  const titleTimeoutMs = 30_000;
+  let generation = 0;
   let activeApi = null;
+
+  // FCA can leave a transport promise pending indefinitely. Bound our wait;
+  // the underlying request cannot be aborted, so late results are ignored.
+  function setTitle(api, name, threadID) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (error, result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        pendingTitles.delete(cancel);
+        if (error) reject(error);
+        else resolve(result);
+      };
+      const cancel = () => finish(new Error('NM_CONNECTION_CHANGED'));
+      const timeout = setTimeout(() => finish(new Error('NM_SET_TITLE_TIMEOUT')), titleTimeoutMs);
+      pendingTitles.add(cancel);
+      try {
+        Promise.resolve(api.setTitle(name, threadID)).then(
+          result => finish(null, result),
+          error => finish(error)
+        );
+      } catch (error) {
+        finish(error);
+      }
+    });
+  }
+
+  function invalidateConnection() {
+    generation++;
+    for (const cancel of [...pendingTitles]) cancel();
+    for (const threadID of [...timers.keys()]) clearTimer(threadID);
+  }
 
   function persist() {
     const directory = path.dirname(filePath);
@@ -193,21 +229,23 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized, commandNa
   function schedule(threadID, entry) {
     clearTimer(threadID);
     if (!activeApi || state.groups[threadID] !== entry) return;
-
+    const api = activeApi;
+    const scheduledGeneration = generation;
+    const isCurrent = () => generation === scheduledGeneration && activeApi === api && state.groups[threadID] === entry;
 
     const range = entry.maxSeconds - entry.minSeconds + 1;
     const seconds = entry.minSeconds + Math.floor(Math.random() * range);
     const timer = setTimeout(async () => {
+      if (timers.get(threadID) !== timer) return;
       timers.delete(threadID);
-      if (!activeApi || state.groups[threadID] !== entry) return;
-
+      if (!isCurrent()) return;
 
       try {
-        await activeApi.setTitle(entry.name, threadID);
+        await setTitle(api, entry.name, threadID);
       } catch (error) {
-        console.error(`[الث ${command}] تعذر إعادة اسم المجموعة للمحادثة ${threadID}:`, error?.message || error);
+        if (isCurrent()) console.error(`[الث ${command}] تعذر إعادة اسم المجموعة للمحادثة ${threadID}:`, error?.message || error);
       } finally {
-        if (activeApi && state.groups[threadID] === entry) {
+        if (isCurrent()) {
           schedule(threadID, entry);
         }
       }
@@ -329,13 +367,16 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized, commandNa
       return true;
     }
 
+    const requestGeneration = generation;
     try {
-      await api.setTitle(name, threadID);
+      await setTitle(api, name, threadID);
     } catch (error) {
+      if (generation !== requestGeneration) return true;
       await send(api, 'تعذر تغيير اسم المجموعة. تحققي من اتصال البوت وصلاحيته في المجموعة.', threadID);
       console.error(`[الث ${command}] تعذر تعيين الاسم للمحادثة ${threadID}:`, error?.message || error);
       return true;
     }
+    if (generation !== requestGeneration) return true;
 
     const previous = state.groups[threadID];
     const entry = { name, minSeconds, maxSeconds };
@@ -359,7 +400,7 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized, commandNa
     if (!api || typeof api.setTitle !== 'function') {
       throw new TypeError('start(api) requires an API with setTitle(name, threadID)');
     }
-    for (const threadID of [...timers.keys()]) clearTimer(threadID);
+    invalidateConnection();
     activeApi = api;
     for (const [threadID, entry] of Object.entries(state.groups)) {
       schedule(threadID, entry);
@@ -368,7 +409,7 @@ function createNmCommand({ dataFile = DEFAULT_DATA_FILE, isAuthorized, commandNa
   }
 
   function stop() {
-    for (const threadID of [...timers.keys()]) clearTimer(threadID);
+    invalidateConnection();
     activeApi = null;
     return timers.size;
   }
