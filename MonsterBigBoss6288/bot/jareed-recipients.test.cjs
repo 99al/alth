@@ -103,7 +103,7 @@ for (const profile of Object.keys(profiles)) {
     const { api, calls } = makeApi();
     await command.execute(api, { body: `${cfg.command} 1 1 بلا اختيار`, threadID: 'private', senderID: 'private', isGroup: false });
     assert.equal(commandState.get(stateKey(profile), 'private'), undefined);
-    assert.match(calls.messages.at(-1).message, /حدّد المستلمين/u);
+    assert.match(calls.messages.at(-1).message, /آيدي حساب المستلم/u);
   });
 
   test(`${profile}: multiple fake-timed cycles send all selected recipients`, { concurrency: false }, async t => {
@@ -146,7 +146,7 @@ for (const profile of Object.keys(profiles)) {
     t.mock.timers.tick(1000); await flushAsyncWork();
     t.mock.timers.tick(1000); await flushAsyncWork();
     const sent = listed.calls.messages.filter(c => c.message === 'استمرار').map(c => c.threadID);
-    assert.deepEqual(sent, ['good-1', 'bad', 'good-2', 'good-1', 'bad', 'good-2']);
+    assert.deepEqual(sent, ['good-1', 'bad', 'good-2', 'good-1', 'good-2']);
   });
 
   test(`${profile}: stopping prevents any new cycles`, { concurrency: false }, async t => {

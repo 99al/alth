@@ -39,13 +39,6 @@ function installDelayedSendMessage(api, options = {}) {
         }
 
         setTimeout(() => {
-          const args = [msg, threadID, callback, ...rest];
-          if (typeof callback === 'function') {
-            args[2] = (sendErr, messageInfo) => {
-              try { callback(sendErr, messageInfo); } catch {}
-            };
-          }
-
           let settled = false;
           const finish = (handler, value) => {
             if (settled) return;
@@ -53,16 +46,32 @@ function installDelayedSendMessage(api, options = {}) {
             clearTimeout(timeout);
             handler(value);
           };
+          let callbackCalled = false;
+          const sendCallback = (sendErr, messageInfo) => {
+            if (callbackCalled) return;
+            callbackCalled = true;
+            if (typeof callback === 'function') {
+              try { callback(sendErr, messageInfo); } catch {}
+            }
+            if (sendErr) finish(reject, sendErr);
+            else finish(resolve, messageInfo);
+          };
+          const args = [msg, threadID, sendCallback, ...rest];
           const timeout = setTimeout(
             () => finish(reject, new Error(`Messenger send timed out after ${sendTimeoutMs}ms`)),
             sendTimeoutMs
           );
 
           try {
-            Promise.resolve(rawSendMessage(...args)).then(
-              value => finish(resolve, value),
-              error => finish(reject, error)
-            );
+            const returned = rawSendMessage(...args);
+            if (returned && typeof returned.then === 'function') {
+              returned.then(
+                value => finish(resolve, value),
+                error => finish(reject, error)
+              );
+            } else if (returned !== undefined || rawSendMessage.length < 3) {
+              finish(resolve, returned);
+            }
           } catch (sendError) {
             finish(reject, sendError);
           }

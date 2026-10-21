@@ -146,6 +146,13 @@ async function handleMessage(api, event, dependencies = {}) {
     event.senderID || ''
   );
 
+  // A bare recipient ID belongs only to the same admin's pending private setup.
+  const scheduledMessageCommand = commands.get(commandProfile.jareed.commandName);
+  if (canAdmin(senderID) && commandEnabled(commandProfile.jareed.commandName) &&
+      scheduledMessageCommand && typeof scheduledMessageCommand.handleRecipientFollowup === 'function') {
+    if (await scheduledMessageCommand.handleRecipientFollowup(api, event)) return;
+  }
+
   // ─── منح/سحب مشرف بالرد فقط (قبل العداد والردود والتفاعلات) ───
   const isGrantAdmin = body === 'ادمن';
   const isRevokeAdmin = body === 'سحب ادمن';
