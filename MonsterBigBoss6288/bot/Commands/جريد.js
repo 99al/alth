@@ -3,6 +3,8 @@
 const activeSchedules = new Map();
 const pendingSleeps = new Map();
 const pendingRecipientSelections = new Map();
+const pendingDirectSchedules = new Map();
+const PENDING_RECIPIENT_TTL_MS = 10 * 60 * 1000;
 const commandState = require('../command-state.cjs').defaultStore;
 const { getBotCommandProfile } = require('../bot-command-profile.cjs');
 const commandProfile = getBotCommandProfile();
@@ -103,6 +105,7 @@ function parseRecipientAction(args) {
 function isPrivateControlThread(event) {
   const threadID = String(event.threadID || '');
   const senderID = String(event.senderID || '');
+  if (event.isGroup === true) return false;
   return event.isGroup === false || Boolean(threadID && senderID && threadID === senderID);
 }
 
@@ -238,7 +241,22 @@ async function runSchedule(api, controlThreadID, schedule) {
         await api.sendMessage(schedule.message, recipient.threadID);
         sent++;
       } catch (error) {
-        console.error(`[${commandName}] تعذر الإرسال إلى ${recipient.threadID}:`, error?.message || error);
+        console.error(`[${commandName}] تعذر الإرسال إلى المستلم؛ لن تُعاد المحاولة له.`);
+        if (schedule.targetType === 'private' || Array.isArray(schedule.recipients)) {
+          schedule.recipients = schedule.recipients.filter(item => item.threadID !== recipient.threadID);
+          try {
+            if (schedule.recipients.length) commandState.set(stateCommandName, controlThreadID, schedule);
+            else {
+              activeSchedules.delete(controlThreadID);
+              commandState.remove(stateCommandName, controlThreadID);
+            }
+          } catch {
+            activeSchedules.delete(controlThreadID);
+            console.error(`[${commandName}] أُوقفت الجدولة لتعذر حفظ استبعاد المستلم.`);
+          }
+          // Inform only the control chat; never contact the rejected recipient again.
+          void Promise.resolve(api.sendMessage(`⏹️ أُوقف الإرسال إلى الحساب ${recipient.threadID} لأن Messenger رفض الإرسال أو تعذّر تسليمه.`, controlThreadID)).catch(() => {});
+        }
       }
     }
     console.log(`[${commandName}] أُرسلت دورة إلى ${sent} من ${recipients.length} محادثة بعد ${(delay / 1000).toFixed(0)}ث`);
@@ -367,6 +385,8 @@ module.exports = {
     const parsed = parseSchedule(body);
     if (!parsed) return;
     if (parsed.stop) {
+      const wasPending = pendingDirectSchedules.delete(threadID);
+      pendingRecipientSelections.delete(threadID);
       const wasActive = activeSchedules.has(threadID);
       activeSchedules.delete(threadID);
       cancelSleep(threadID);
@@ -377,7 +397,7 @@ module.exports = {
         await api.sendMessage(`⏹️ أُوقف الإرسال في هذه العملية، لكن تعذر حفظ الإيقاف الدائم. أعد «${commandName} ايقاف» بعد عودة التخزين.`, threadID);
         return;
       }
-      if (wasActive || wasSaved) {
+      if (wasActive || wasSaved || wasPending) {
         await api.sendMessage(`✅ تم إيقاف ${commandName} في هذه المحادثة وإيقاف مستلميها.`, threadID);
       } else {
         await api.sendMessage('⚠️ لا توجد جدولة مفعّلة في هذه المحادثة.', threadID);
@@ -409,7 +429,15 @@ module.exports = {
     if (isPrivate) {
       const selection = pendingRecipientSelections.get(threadID);
       if (!selection || selection.selected.length === 0) {
-        await api.sendMessage(`⚠️ حدّد المستلمين أولًا: أرسل «${commandName}»، اختر الأرقام، ثم أعد أمر الرسالة. لن يبدأ الإرسال قبل اختيارهم.`, threadID);
+        pendingDirectSchedules.set(threadID, {
+          senderID: String(event.senderID || ''),
+          createdAt: Date.now(),
+          minSeconds: parsed.minSeconds,
+          maxSeconds: parsed.maxSeconds,
+          message: parsed.message
+        });
+        await api.sendMessage(`أرسل الآن آيدي حساب المستلم كرسالة تالية (أرقام فقط). لن يبدأ الإرسال قبل وصوله.
+للإلغاء: ${commandName} ايقاف`, threadID);
         return;
       }
       recipients = selection.selected.map(({ threadID: recipientThreadID, name }) => ({
@@ -439,6 +467,40 @@ module.exports = {
       threadID
     );
   },
+  async handleRecipientFollowup(api, event) {
+    const threadID = String(event.threadID || '');
+    const pending = pendingDirectSchedules.get(threadID);
+    if (!pending || pending.senderID !== String(event.senderID || '') || !isPrivateControlThread(event)) return false;
+    if (Date.now() - pending.createdAt > PENDING_RECIPIENT_TTL_MS) {
+      pendingDirectSchedules.delete(threadID);
+      return false;
+    }
+    const recipientID = normalizeDigits(String(event.body || '').trim());
+    if (!/^[1-9]\d{4,24}$/u.test(recipientID)) return false;
+    // Consume synchronously so duplicate incoming events cannot start two loops.
+    pendingDirectSchedules.delete(threadID);
+    if (activeSchedules.has(threadID)) return true;
+    const schedule = {
+      minSeconds: pending.minSeconds,
+      maxSeconds: pending.maxSeconds,
+      message: pending.message,
+      targetType: 'private',
+      recipients: [{ threadID: recipientID, name: recipientID }]
+    };
+    try {
+      if (commandState.get(stateCommandName, threadID)) return true;
+      commandState.set(stateCommandName, threadID, schedule);
+    } catch {
+      await api.sendMessage(`❌ تعذر حفظ جدول ${commandName}؛ لم يبدأ الإرسال. أعد الأمر.`, threadID);
+      return true;
+    }
+    startSchedule(api, threadID, schedule);
+    await api.sendMessage(`تم تشغيل ${commandName} للحساب ${recipientID}.
+الرسالة: ${schedule.message}
+الفاصل العشوائي: ${schedule.minSeconds}–${schedule.maxSeconds} ثانية.
+للإيقاف: ${commandName} ايقاف`, threadID);
+    return true;
+  },
   isActive(threadID) {
     const key = String(threadID);
     if (activeSchedules.has(key)) return true;
@@ -465,6 +527,7 @@ module.exports = {
     for (const threadID of [...activeSchedules.keys()]) cancelSleep(threadID);
     activeSchedules.clear();
     pendingRecipientSelections.clear();
+    pendingDirectSchedules.clear();
     return paused;
   }
 };
