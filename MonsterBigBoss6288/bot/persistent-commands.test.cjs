@@ -170,7 +170,7 @@ test('جريد restores a saved schedule and manual stop prevents it from return
   const resumed = fresh('./Commands/جريد.js');
   assert.equal(resumed.resumeAll(api), 1);
   assert.equal(resumed.isActive(threadID), true);
-  await resumed.execute(api, { body: 'جريد ايقاف', threadID });
+  await resumed.execute(api, { body: `${getBotCommandProfile().jareed.commandName} ايقاف`, threadID });
   assert.equal(commandState.get('جريد', threadID), undefined);
   assert.equal(resumed.isActive(threadID), false);
 
@@ -300,16 +300,17 @@ test('dispatcher keeps the first-bot commands and routes renamed commands only i
   ]);
 
   loadCommands();
-  assert.ok(commands.has('nm'), 'the default first-bot registry keeps nm');
+  const runtimeProfile = getBotCommandProfile();
+  assert.ok(commands.has(runtimeProfile.nm.commandName), 'the runtime registry keeps its profile-specific name lock');
   const helpApi = makeApi();
   await handleMessage(helpApi.api, { body: 'اومر', threadID: 'help', senderID: 'admin' }, {
     commands,
-    commandProfile: firstProfile,
+    commandProfile: runtimeProfile,
     isAdmin: () => true,
     isCommandEnabled: () => true
   });
   await flushAsyncWork();
-  assert.ok(helpApi.calls.messages.some(({ message }) => message.includes('جريد')));
+  assert.ok(helpApi.calls.messages.some(({ message }) => message.includes(runtimeProfile.jareed.commandName)));
 });
 
 test('second BOT_COMMAND_PROFILE loads nmm and جريدة as registered names without the first-bot spellings', () => {
