@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const adminStore = require('./admin-store.cjs');
 const nmCommand = require('./nm-command.standalone');
 const { getBotCommandProfile } = require('./bot-command-profile.cjs');
 const serviceCommandProfile = getBotCommandProfile();
@@ -50,11 +51,7 @@ const BOT_NICKNAME = `┌─── ⋆⋅☠︎⋅⋆ ───┐
 
 // ─── التحقق من المشرف ───
 function isAdmin(senderID) {
-  // إعادة تحميل المشرفين عند كل تحقق
-  // حتى يتم تطبيق التغييرات مباشرة
-  const current = loadAdmins();
-
-  return current.has(String(senderID));
+  return adminStore.isAdmin(senderID);
 }
 
 // ─── تحميل الأوامر ───
@@ -148,6 +145,30 @@ async function handleMessage(api, event, dependencies = {}) {
   const senderID = String(
     event.senderID || ''
   );
+
+  // ─── منح/سحب مشرف بالرد فقط (قبل العداد والردود والتفاعلات) ───
+  const isGrantAdmin = body === 'ادمن';
+  const isRevokeAdmin = body === 'سحب ادمن';
+  if (isGrantAdmin || isRevokeAdmin) {
+    if (!canAdmin(senderID)) return;
+    const targetID = event.messageReply && event.messageReply.senderID;
+    if (!targetID || !/^[1-9]\d*$/.test(String(targetID))) {
+      if (api && typeof api.sendMessage === 'function') {
+        await Promise.resolve(api.sendMessage('⚠️ يجب الرد على رسالة الشخص المستهدف.', threadID)).catch(() => {});
+      }
+      return;
+    }
+    const result = isGrantAdmin
+      ? adminStore.add(String(targetID))
+      : adminStore.remove(String(targetID));
+    if (api && typeof api.sendMessage === 'function') {
+      const message = result.ok
+        ? (isGrantAdmin ? '✅ تمت إضافة المشرف.' : '✅ تم سحب المشرف.')
+        : result.reason === 'last' ? '⚠️ لا يمكن سحب آخر مشرف.' : '❌ تعذر حفظ التغيير.';
+      await Promise.resolve(api.sendMessage(message, threadID)).catch(() => {});
+    }
+    return;
+  }
 
   // ─── قائمة الأوامر ───
   if (/^(?:اومر|أوامر)(?:\s|$)/u.test(body)) {
@@ -304,7 +325,7 @@ async function handleMessage(api, event, dependencies = {}) {
     body === 'ويس ايقاف' ||
     body === 'ويس إيقاف'
   ) {
-    if (!isAdmin(senderID)) {
+    if (!canAdmin(senderID)) {
       return;
     }
 
@@ -363,7 +384,7 @@ async function handleMessage(api, event, dependencies = {}) {
     body.startsWith('مجموعة ') ||
     body.startsWith('جروب ')
   ) {
-    if (!isAdmin(senderID)) {
+    if (!canAdmin(senderID)) {
       return;
     }
 
@@ -391,7 +412,7 @@ async function handleMessage(api, event, dependencies = {}) {
     body.startsWith('رد ') ||
     body === 'رد قائمة'
   ) {
-    if (!isAdmin(senderID)) {
+    if (!canAdmin(senderID)) {
       return;
     }
 
@@ -441,7 +462,7 @@ async function handleMessage(api, event, dependencies = {}) {
   if (
     /^(?:files|ملفات)(?:\s|$)/iu.test(body)
   ) {
-    if (!isAdmin(senderID)) {
+    if (!canAdmin(senderID)) {
       return;
     }
 
