@@ -8,7 +8,7 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 if (!process.env.COMMAND_LIST_PROFILE_TEST) {
-  for (const profile of ['first', 'second']) {
+  for (const profile of ['first', 'second', 'third']) {
     test(`command list access with ${profile} bot profile`, () => {
       const result = spawnSync(process.execPath, [__filename], {
         env: { ...process.env, BOT_COMMAND_PROFILE: profile, COMMAND_LIST_PROFILE_TEST: '1' },

@@ -10,7 +10,8 @@ process.env.ALTH_COMMAND_STATE_PATH = path.join(os.tmpdir(), `alth-jareed-recipi
 const commandState = require('./command-state.cjs').defaultStore;
 const profiles = {
   first: { command: 'جريد', aliases: ['جرائد', 'جريد البوت'], other: 'جريدة' },
-  second: { command: 'جريدة', aliases: ['جريدة البوت'], other: 'جريد' }
+  second: { command: 'جريدة', aliases: ['جريدة البوت'], other: 'جريد' },
+  third: { command: 'جينو', aliases: ['جينو البوت'], other: 'جريدة' }
 };
 
 function freshCommand(profile) {

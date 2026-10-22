@@ -353,3 +353,29 @@ test('second BOT_COMMAND_PROFILE loads nmm and جريدة as registered names wi
   assert.ok(report.messages.some(message => message.includes('قفل الاسم')));
   assert.ok(report.messages.some(message => message.includes('الصيغة: جريدة 10 15 نص الرسالة')));
 });
+
+
+test('third BOT_COMMAND_PROFILE loads nms and جينو without the other profile spellings', () => {
+  const env = {
+    ...process.env,
+    NODE_ENV: 'test',
+    BOT_COMMAND_PROFILE: 'third',
+    ALTH_COMMAND_STATE_PATH: path.join(os.tmpdir(), `alth-third-profile-${process.pid}`, 'state.json')
+  };
+  const script = [
+    "const { loadCommands, commands } = require('./main');",
+    'loadCommands();',
+    "process.stdout.write('PROFILE_RESULT:' + JSON.stringify({ names: [...commands.keys()], jareed: commands.get('جينو')?.name }));"
+  ].join('\n');
+  const output = execFileSync(process.execPath, ['-e', script], { cwd: __dirname, env, encoding: 'utf8' });
+  const result = output.match(/PROFILE_RESULT:(\{[^\n]+\})/);
+  assert.ok(result, 'child process reports the loaded third profile command names');
+  const report = JSON.parse(result[1]);
+  assert.ok(report.names.includes('nms'));
+  assert.ok(report.names.includes('جينو'));
+  assert.equal(report.names.includes('nm'), false);
+  assert.equal(report.names.includes('nmm'), false);
+  assert.equal(report.names.includes('جريد'), false);
+  assert.equal(report.names.includes('جريدة'), false);
+  assert.equal(report.jareed, 'جينو');
+});

@@ -12,7 +12,7 @@ function fresh(profile) {
   return require('./Commands/جريد.js');
 }
 async function flush() { for (let i = 0; i < 10; i++) await new Promise(resolve => setImmediate(resolve)); }
-for (const [profile, name] of [['first', 'جريد'], ['second', 'جريدة']]) {
+for (const [profile, name] of [['first', 'جريد'], ['second', 'جريدة'], ['third', 'جينو']]) {
   test(`${profile}: command then ID, same sender and private chat, literal text, repeat, resume and stop`, async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const cmd = fresh(profile); t.after(() => { cmd.pauseAll(); store.clear('جريد'); });
