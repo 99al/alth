@@ -2,8 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const adminStore = require('./admin-store.cjs');
 const nmCommand = require('./nm-command.standalone');
+const { createAdminIdHandler, commandEntries } = require('./admin-id-commands.cjs');
 const { getBotCommandProfile } = require('./bot-command-profile.cjs');
 const serviceCommandProfile = getBotCommandProfile();
+const adminIdHandler = createAdminIdHandler({ store: adminStore });
 
 // ─── قراءة المشرفين من ملف admins-config.json ───
 function loadAdmins(configPath = path.join(__dirname, 'admins-config.json')) {
@@ -57,12 +59,17 @@ function isAdmin(senderID) {
 // ─── تحميل الأوامر ───
 function loadCommands() {
   const commandsPath = path.join(__dirname, 'Commands');
+  const registerAdminIdCommands = () => {
+    for (const command of commandEntries(adminIdHandler)) commandRegistry.set(command.name, command);
+    console.log('[الث] Admin ID commands ready');
+  };
 
   if (!fs.existsSync(commandsPath)) {
     console.error('[الث] تعذر تحميل الأوامر.');
 
     commandRegistry.clear();
     commandRegistry.set(serviceCommandProfile.nm.commandName, nmCommand);
+    registerAdminIdCommands();
     return;
   }
 
@@ -94,6 +101,7 @@ function loadCommands() {
   }
 
   commandRegistry.set(serviceCommandProfile.nm.commandName, nmCommand);
+  registerAdminIdCommands();
 
   console.log('[الث] اكتمل تحميل الأوامر.');
 }
@@ -135,6 +143,7 @@ async function handleMessage(api, event, dependencies = {}) {
   const canAdmin = dependencies.isAdmin || isAdmin;
   const commandEnabled = dependencies.isCommandEnabled || isCommandEnabled;
   const commandProfile = dependencies.commandProfile || serviceCommandProfile;
+  const adminCommands = dependencies.adminIdHandler || adminIdHandler;
 
   const body = String(event.body || '').trim();
 
@@ -145,6 +154,10 @@ async function handleMessage(api, event, dependencies = {}) {
   const senderID = String(
     event.senderID || ''
   );
+
+  // إدارة المشرفين بالأيدي قبل متابعة جريد، العداد، الردود والتفاعلات.
+  if (adminCommands && typeof adminCommands.handle === 'function' &&
+      await adminCommands.handle(api, event)) return;
 
   // A bare recipient ID belongs only to the same admin's pending private setup.
   const scheduledMessageCommand = commands.get(commandProfile.jareed.commandName);
