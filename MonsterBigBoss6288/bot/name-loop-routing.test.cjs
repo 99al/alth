@@ -184,7 +184,7 @@ test('كل BOT_COMMAND_PROFILE لا يسجل ولا يوجه قروب ويحاف
     "Promise.resolve(handleMessage(api, { body: 'قروب اسم', threadID: 'profile-test', senderID: 'admin' }, { commands: commandMap, isAdmin: () => true, isCommandEnabled: () => true })).then(() => handleMessage(api, { body: 'مجموعة اسم', threadID: 'profile-test', senderID: 'admin' }, { commands: commandMap, isAdmin: () => true, isCommandEnabled: () => true })).then(() => console.log(JSON.stringify({ registered: commands.has('قروب'), calls })));"
   ].join('\n');
 
-  for (const profile of ['first', 'second']) {
+  for (const profile of ['first', 'second', 'third', 'fourth']) {
     const output = execFileSync(process.execPath, ['-e', script], {
       cwd: __dirname,
       env: { ...process.env, NODE_ENV: 'test', BOT_COMMAND_PROFILE: profile },

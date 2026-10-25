@@ -224,6 +224,17 @@ function isPathWithin(target, directory) {
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
+function sourceRepositoryRootForModuleDirectory(moduleDirectory) {
+  const sourceDirectory = path.resolve(moduleDirectory);
+  const parentDirectory = path.dirname(sourceDirectory);
+  const filesystemRoot = path.parse(parentDirectory).root;
+  return parentDirectory === filesystemRoot ? sourceDirectory : parentDirectory;
+}
+
+function getSourceRepositoryRoot() {
+  return fs.realpathSync.native(sourceRepositoryRootForModuleDirectory(__dirname));
+}
+
 function isProductionRuntime(env = process.env) {
   const railwayKeys = ['RAILWAY_ENVIRONMENT', 'RAILWAY_PROJECT_ID', 'RAILWAY_SERVICE_ID'];
   const isExplicitlyLocal = ['development', 'test'].includes(env.NODE_ENV);
@@ -274,7 +285,7 @@ function resolveAppstatePath(env = process.env) {
   );
   let repositoryRoot;
   try {
-    repositoryRoot = fs.realpathSync.native(path.resolve(__dirname, '..'));
+    repositoryRoot = getSourceRepositoryRoot();
   } catch {
     throw new Error('Source repository path could not be safely canonicalized');
   }
@@ -399,7 +410,7 @@ function writeAppstate(value) {
 
 function getAppstateCachePath() {
   const directory = path.join('/data', 'alth-appstate-cache');
-  const repositoryRoot = fs.realpathSync.native(path.resolve(__dirname, '..'));
+  const repositoryRoot = getSourceRepositoryRoot();
   if (isPathWithin(directory, repositoryRoot) || isPathWithin(repositoryRoot, directory)) {
     throw new Error('Appstate cache must remain outside the source repository');
   }
@@ -410,7 +421,7 @@ function resolvePrivateAppstateCachePath(filePath) {
   const target = path.resolve(filePath);
   const directory = path.dirname(target);
   const canonicalDirectory = canonicalizePathAllowMissing(directory);
-  const repositoryRoot = fs.realpathSync.native(path.resolve(__dirname, '..'));
+  const repositoryRoot = getSourceRepositoryRoot();
   if (canonicalDirectory !== directory ||
       isPathWithin(target, repositoryRoot) || isPathWithin(repositoryRoot, target)) {
     throw new Error('Appstate cache path is not private and external to the source repository');

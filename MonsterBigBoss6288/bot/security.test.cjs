@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const Module = require('node:module');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
@@ -120,6 +121,29 @@ test('production appstate cache uses the Railway volume mounted at /data', () =>
     security.getAppstateCachePath(),
     path.join('/data', 'alth-appstate-cache', 'appstate.json'),
   );
+});
+
+test('production cache path treats /app as the source root when its parent is the filesystem root', () => {
+  const realpathNative = fs.realpathSync.native;
+  const modulePath = '/app/security.cjs';
+  const isolatedModule = new Module(modulePath, module);
+  isolatedModule.filename = modulePath;
+  isolatedModule.paths = Module._nodeModulePaths('/app');
+
+  try {
+    fs.realpathSync.native = target => {
+      if (path.resolve(target) === '/app') return '/app';
+      return realpathNative(target);
+    };
+    isolatedModule._compile(fs.readFileSync(path.join(__dirname, 'security.cjs'), 'utf8'), modulePath);
+
+    assert.equal(
+      isolatedModule.exports.getAppstateCachePath(),
+      path.join('/data', 'alth-appstate-cache', 'appstate.json'),
+    );
+  } finally {
+    fs.realpathSync.native = realpathNative;
+  }
 });
 
 test('production seeds a private cache from APPSTATE_JSON and requires a source when the cache is empty', () => {

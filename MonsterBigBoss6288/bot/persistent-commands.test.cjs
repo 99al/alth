@@ -353,3 +353,65 @@ test('second BOT_COMMAND_PROFILE loads nmm and جريدة as registered names wi
   assert.ok(report.messages.some(message => message.includes('قفل الاسم')));
   assert.ok(report.messages.some(message => message.includes('الصيغة: جريدة 10 15 نص الرسالة')));
 });
+
+
+test('third BOT_COMMAND_PROFILE loads nms and جينو without the other profile spellings', () => {
+  const env = {
+    ...process.env,
+    NODE_ENV: 'test',
+    BOT_COMMAND_PROFILE: 'third',
+    ALTH_COMMAND_STATE_PATH: path.join(os.tmpdir(), `alth-third-profile-${process.pid}`, 'state.json')
+  };
+  const script = [
+    "const { loadCommands, commands } = require('./main');",
+    'loadCommands();',
+    "process.stdout.write('PROFILE_RESULT:' + JSON.stringify({ names: [...commands.keys()], jareed: commands.get('جينو')?.name }));"
+  ].join('\n');
+  const output = execFileSync(process.execPath, ['-e', script], { cwd: __dirname, env, encoding: 'utf8' });
+  const result = output.match(/PROFILE_RESULT:(\{[^\n]+\})/);
+  assert.ok(result, 'child process reports the loaded third profile command names');
+  const report = JSON.parse(result[1]);
+  assert.ok(report.names.includes('nms'));
+  assert.ok(report.names.includes('جينو'));
+  assert.equal(report.names.includes('nm'), false);
+  assert.equal(report.names.includes('nmm'), false);
+  assert.equal(report.names.includes('جريد'), false);
+  assert.equal(report.names.includes('جريدة'), false);
+  assert.equal(report.jareed, 'جينو');
+});
+
+test('fourth BOT_COMMAND_PROFILE loads and routes /na and جين without prior service spellings', () => {
+  const env = {
+    ...process.env,
+    NODE_ENV: 'test',
+    BOT_COMMAND_PROFILE: 'fourth',
+    ALTH_COMMAND_STATE_PATH: path.join(os.tmpdir(), `alth-fourth-profile-${process.pid}`, 'state.json')
+  };
+  const script = [
+    "const { loadCommands, commands, handleMessage } = require('./main');",
+    "const { getBotCommandProfile } = require('./bot-command-profile.cjs');",
+    'const profile = getBotCommandProfile();',
+    'loadCommands();',
+    'const routed = [];',
+    "const map = new Map([['na', { execute: (_api, event) => routed.push(['na', event.body]) }], ['جين', { execute: (_api, event) => routed.push(['جين', event.body]) }]]);",
+    'const dependencies = { commands: map, commandProfile: profile, isAdmin: () => true, isCommandEnabled: () => true };',
+    'const api = { sendMessage: async () => {} };',
+    "Promise.resolve(handleMessage(api, { body: '/na status', threadID: 'fourth', senderID: 'admin' }, dependencies))",
+    "  .then(() => handleMessage(api, { body: '/nm status', threadID: 'fourth', senderID: 'admin' }, dependencies))",
+    "  .then(() => handleMessage(api, { body: 'جين 1 1 نص', threadID: 'fourth', senderID: 'admin' }, dependencies))",
+    "  .then(() => handleMessage(api, { body: 'جينو 1 1 نص', threadID: 'fourth', senderID: 'admin' }, dependencies))",
+    "  .then(() => process.stdout.write('PROFILE_RESULT:' + JSON.stringify({ names: [...commands.keys()], profile, routed })));"
+  ].join('\n');
+  const output = execFileSync(process.execPath, ['-e', script], { cwd: __dirname, env, encoding: 'utf8' });
+  const result = output.match(/PROFILE_RESULT:(\{[^\n]+\})/);
+  assert.ok(result, 'child process reports the fourth profile commands and routes');
+  const report = JSON.parse(result[1]);
+  assert.ok(report.names.includes('na'));
+  assert.ok(report.names.includes('جين'));
+  for (const oldName of ['nm', 'nmm', 'nms', 'جريد', 'جريدة', 'جينو']) {
+    assert.equal(report.names.includes(oldName), false, `${oldName} must not be registered for the fourth bot`);
+  }
+  assert.equal(report.profile.nm.commandName, 'na');
+  assert.equal(report.profile.jareed.commandName, 'جين');
+  assert.deepEqual(report.routed, [['na', '/na status'], ['جين', 'جين 1 1 نص']]);
+});

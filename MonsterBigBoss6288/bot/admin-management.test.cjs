@@ -98,7 +98,7 @@ if (process.env.ADMIN_CHILD) {
     const result = spawnSync(process.execPath, [__filename], { env, encoding: 'utf8' });
     assert.equal(result.status, 0, `${profile}/${scenario}: ${result.stdout}\n${result.stderr}`);
   }
-  for (const profile of ['first', 'second']) {
+  for (const profile of ['first', 'second', 'third', 'fourth']) {
     test(`grant/revoke, profile routing and restart persistence (${profile})`, t => {
       const files = setup(t);
       child(profile, 'routing', files);
