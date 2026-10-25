@@ -5,6 +5,9 @@ const path = require('path');
 
 const ID_RE = /^[1-9]\d*$/;
 const DEFAULT_CONFIG = path.join(__dirname, 'admins-config.json');
+const FOURTH_PROFILE = 'fourth';
+const FOURTH_CURRENT_ADMIN = '61594703229486';
+const FOURTH_LEGACY_ADMIN = '100041346095449';
 
 function statePath(env = process.env) {
   if (isProductionRuntime(env)) {
@@ -73,6 +76,15 @@ function parseState(raw) {
   return { admins, revoked };
 }
 
+function shouldMigrateFourthLegacyState(state, configPath, env) {
+  const profile = typeof env.BOT_COMMAND_PROFILE === 'string'
+    ? env.BOT_COMMAND_PROFILE.trim().toLowerCase()
+    : '';
+  if (profile !== FOURTH_PROFILE || state.revoked.size !== 0 || state.admins.size !== 1 || !state.admins.has(FOURTH_LEGACY_ADMIN)) return false;
+  const seed = readSeed(configPath);
+  return seed.length === 1 && seed[0] === FOURTH_CURRENT_ADMIN;
+}
+
 function load(configPath = DEFAULT_CONFIG, env = process.env) {
   const file = statePath(env);
   try {
@@ -90,7 +102,14 @@ function load(configPath = DEFAULT_CONFIG, env = process.env) {
       return admins;
     }
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('INVALID_ADMIN_STATE_PATH');
-    return parseState(fs.readFileSync(file, 'utf8')).admins;
+    const state = parseState(fs.readFileSync(file, 'utf8'));
+    if (shouldMigrateFourthLegacyState(state, configPath, env)) {
+      const migrated = { admins: [FOURTH_CURRENT_ADMIN], revoked: [] };
+      writeJsonAtomic(file, migrated);
+      console.info('[الث] Fourth admin bootstrap migration applied');
+      return new Set(migrated.admins);
+    }
+    return state.admins;
   } catch {
     return new Set();
   }

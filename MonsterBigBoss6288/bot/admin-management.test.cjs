@@ -139,4 +139,38 @@ if (process.env.ADMIN_CHILD) {
     assert.equal(store.statePath({ RAILWAY_SERVICE_ID: 'service' }), '/data/alth-admin-state/service-admins.json');
     assert.match(store.statePath({ RAILWAY_PROJECT_ID: 'project' }), /^\/data\//);
   });
+  test('fourth legacy bootstrap migrates atomically and persists the new admin', t => {
+    const f = setup(t);
+    fs.writeFileSync(f.state, JSON.stringify({ admins: ['100041346095449'], revoked: [] }));
+    const env = { NODE_ENV: 'test', BOT_COMMAND_PROFILE: 'fourth', ALTH_ADMIN_STATE_PATH: f.state };
+
+    assert.deepEqual([...store.load(f.seed, env)], [owner]);
+    assert.equal(store.isAdmin(owner, f.seed, env), true);
+    assert.equal(store.isAdmin('100041346095449', f.seed, env), false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(f.state, 'utf8')), { admins: [owner], revoked: [] });
+    assert.deepEqual([...store.load(f.seed, env)], [owner]);
+  });
+  test('legacy bootstrap is unchanged for other profiles', t => {
+    const f = setup(t);
+    const legacy = { admins: ['100041346095449'], revoked: [] };
+    fs.writeFileSync(f.state, JSON.stringify(legacy));
+    const env = { NODE_ENV: 'test', BOT_COMMAND_PROFILE: 'third', ALTH_ADMIN_STATE_PATH: f.state };
+
+    assert.equal(store.isAdmin('100041346095449', f.seed, env), true);
+    assert.equal(store.isAdmin(owner, f.seed, env), false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(f.state, 'utf8')), legacy);
+  });
+  test('fourth custom and revoked states are never overwritten', t => {
+    const f = setup(t);
+    const env = { NODE_ENV: 'test', BOT_COMMAND_PROFILE: 'fourth', ALTH_ADMIN_STATE_PATH: f.state };
+    const states = [
+      { admins: ['100041346095449', member], revoked: [] },
+      { admins: ['100041346095449'], revoked: [owner] }
+    ];
+    for (const expected of states) {
+      fs.writeFileSync(f.state, JSON.stringify(expected));
+      assert.deepEqual([...store.load(f.seed, env)], expected.admins.filter(id => !expected.revoked.includes(id)));
+      assert.deepEqual(JSON.parse(fs.readFileSync(f.state, 'utf8')), expected);
+    }
+  });
 }
