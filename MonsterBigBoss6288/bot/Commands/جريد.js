@@ -11,7 +11,7 @@ const commandProfile = getBotCommandProfile();
 const commandName = commandProfile.jareed.commandName;
 const commandAliases = [...commandProfile.jareed.aliases];
 // Both services historically use this key on their separate existing volumes.
-const stateCommandName = 'جريد';
+const stateCommandName = commandName === 'جودي' ? commandName : 'جريد';
 const MAX_DELAY_SECONDS = 24 * 60 * 60;
 const MAX_RECIPIENTS = 10;
 const MAX_THREAD_RESULTS = 100;
