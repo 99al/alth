@@ -12,7 +12,8 @@ const profiles = {
   first: { command: 'جريد', aliases: ['جرائد', 'جريد البوت'], other: 'جريدة' },
   second: { command: 'جريدة', aliases: ['جريدة البوت'], other: 'جريد' },
   third: { command: 'جينو', aliases: ['جينو البوت'], other: 'جريدة' },
-  fourth: { command: 'جين', aliases: [], other: 'جينو' }
+  fourth: { command: 'جين', aliases: [], other: 'جينو' },
+  fifth: { command: 'جودي', aliases: [], other: 'جين' }
 };
 
 function freshCommand(profile) {
@@ -21,7 +22,7 @@ function freshCommand(profile) {
   delete require.cache[resolved];
   return require(resolved);
 }
-function stateKey(_profile) { return 'جريد'; }
+function stateKey(profile) { return profile === 'fifth' ? 'جودي' : 'جريد'; }
 function clearState(profile) { commandState.clear(stateKey(profile)); }
 function makeApi({ threads = [], callbackStyle = false, failIDs = [] } = {}) {
   const calls = { messages: [], listCalls: 0 };

@@ -20,6 +20,11 @@ const profiles = Object.freeze({
     id: 'fourth',
     nm: Object.freeze({ commandName: 'na', aliases: Object.freeze([]) }),
     jareed: Object.freeze({ commandName: 'جين', aliases: Object.freeze([]) })
+  }),
+  fifth: Object.freeze({
+    id: 'fifth',
+    nm: Object.freeze({ commandName: 'nm5', aliases: Object.freeze([]) }),
+    jareed: Object.freeze({ commandName: 'جودي', aliases: Object.freeze([]) })
   })
 });
 
@@ -31,7 +36,8 @@ function getBotCommandProfile(env = process.env) {
   if (requested === 'second') return profiles.second;
   if (requested === 'third') return profiles.third;
   if (requested === 'fourth') return profiles.fourth;
-  throw new Error('BOT_COMMAND_PROFILE must be either "first", "second", "third", or "fourth".');
+  if (requested === 'fifth') return profiles.fifth;
+  throw new Error('BOT_COMMAND_PROFILE must be either "first", "second", "third", "fourth", or "fifth".');
 }
 
 module.exports = { getBotCommandProfile };
