@@ -415,6 +415,41 @@ test('fifth BOT_COMMAND_PROFILE loads and routes /nm5 and جودي without prior
   assert.equal(report.profile.jareed.commandName, 'جودي');
   assert.deepEqual(report.routed, [['nm5', '/nm5 status'], ['جودي', 'جودي 1 1 نص']]);
 });
+test('sixth BOT_COMMAND_PROFILE loads and routes /nm6 and جواد without prior service spellings or aliases', () => {
+  const env = {
+    ...process.env,
+    NODE_ENV: 'test',
+    BOT_COMMAND_PROFILE: 'sixth',
+    ALTH_COMMAND_STATE_PATH: path.join(os.tmpdir(), `alth-sixth-profile-${process.pid}`, 'state.json')
+  };
+  const script = [
+    "const { loadCommands, commands, handleMessage } = require('./main');",
+    "const { getBotCommandProfile } = require('./bot-command-profile.cjs');",
+    'const profile = getBotCommandProfile();',
+    'loadCommands();',
+    'const routed = [];',
+    "const map = new Map([['nm6', { execute: (_api, event) => routed.push(['nm6', event.body]) }], ['جواد', { execute: (_api, event) => routed.push(['جواد', event.body]) }]]);",
+    'const dependencies = { commands: map, commandProfile: profile, isAdmin: () => true, isCommandEnabled: () => true };',
+    'const api = { sendMessage: async () => {} };',
+    "Promise.resolve(handleMessage(api, { body: '/nm6 status', threadID: 'sixth', senderID: 'admin' }, dependencies))",
+    "  .then(() => handleMessage(api, { body: '/nm5 status', threadID: 'sixth', senderID: 'admin' }, dependencies))",
+    "  .then(() => handleMessage(api, { body: 'جواد 1 1 نص', threadID: 'sixth', senderID: 'admin' }, dependencies))",
+    "  .then(() => handleMessage(api, { body: 'جودي 1 1 نص', threadID: 'sixth', senderID: 'admin' }, dependencies))",
+    "  .then(() => process.stdout.write('PROFILE_RESULT:' + JSON.stringify({ names: [...commands.keys()], profile, routed })));"
+  ].join('\n');
+  const output = execFileSync(process.execPath, ['-e', script], { cwd: __dirname, env, encoding: 'utf8' });
+  const result = output.match(/PROFILE_RESULT:(\{[^\n]+\})/);
+  assert.ok(result, 'child process reports the sixth profile command names');
+  const report = JSON.parse(result[1]);
+  assert.ok(report.names.includes('nm6'));
+  assert.ok(report.names.includes('جواد'));
+  for (const oldName of ['nm', 'nmm', 'nms', 'na', 'nm5', 'جريد', 'جريدة', 'جينو', 'جين', 'جودي']) {
+    assert.equal(report.names.includes(oldName), false, `${oldName} must not be registered for the sixth bot`);
+  }
+  assert.equal(report.profile.nm.commandName, 'nm6');
+  assert.equal(report.profile.jareed.commandName, 'جواد');
+  assert.deepEqual(report.routed, [['nm6', '/nm6 status'], ['جواد', 'جواد 1 1 نص']]);
+});
 test('fourth BOT_COMMAND_PROFILE loads and routes /na and جين without prior service spellings', () => {
   const env = {
     ...process.env,

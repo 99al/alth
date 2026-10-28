@@ -13,7 +13,8 @@ const profiles = {
   second: { command: 'جريدة', aliases: ['جريدة البوت'], other: 'جريد' },
   third: { command: 'جينو', aliases: ['جينو البوت'], other: 'جريدة' },
   fourth: { command: 'جين', aliases: [], other: 'جينو' },
-  fifth: { command: 'جودي', aliases: [], other: 'جين' }
+  fifth: { command: 'جودي', aliases: [], other: 'جين' },
+  sixth: { command: 'جواد', aliases: [], other: 'جودي' }
 };
 
 function freshCommand(profile) {
@@ -22,7 +23,7 @@ function freshCommand(profile) {
   delete require.cache[resolved];
   return require(resolved);
 }
-function stateKey(profile) { return profile === 'fifth' ? 'جودي' : 'جريد'; }
+function stateKey(profile) { return ['fifth', 'sixth'].includes(profile) ? (profile === 'sixth' ? 'جواد' : 'جودي') : 'جريد'; }
 function clearState(profile) { commandState.clear(stateKey(profile)); }
 function makeApi({ threads = [], callbackStyle = false, failIDs = [] } = {}) {
   const calls = { messages: [], listCalls: 0 };

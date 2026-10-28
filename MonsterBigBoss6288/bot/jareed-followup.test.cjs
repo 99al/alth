@@ -6,14 +6,14 @@ const test = require('node:test');
 process.env.NODE_ENV = 'test';
 process.env.ALTH_COMMAND_STATE_PATH = path.join(os.tmpdir(), `alth-followup-${process.pid}`, 'state.json');
 const store = require('./command-state.cjs').defaultStore;
-function stateKey(profile) { return profile === 'fifth' ? 'جودي' : 'جريد'; }
+function stateKey(profile) { return ['fifth', 'sixth'].includes(profile) ? (profile === 'sixth' ? 'جواد' : 'جودي') : 'جريد'; }
 function fresh(profile) {
   process.env.BOT_COMMAND_PROFILE = profile;
   delete require.cache[require.resolve('./Commands/جريد.js')];
   return require('./Commands/جريد.js');
 }
 async function flush() { for (let i = 0; i < 10; i++) await new Promise(resolve => setImmediate(resolve)); }
-for (const [profile, name] of [['first', 'جريد'], ['second', 'جريدة'], ['third', 'جينو'], ['fourth', 'جين'], ['fifth', 'جودي']]) {
+for (const [profile, name] of [['first', 'جريد'], ['second', 'جريدة'], ['third', 'جينو'], ['fourth', 'جين'], ['fifth', 'جودي'], ['sixth', 'جواد']]) {
   test(`${profile}: command then ID, same sender and private chat, literal text, repeat, resume and stop`, async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const cmd = fresh(profile); t.after(() => { cmd.pauseAll(); store.clear(stateKey(profile)); });
