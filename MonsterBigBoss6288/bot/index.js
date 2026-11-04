@@ -3,6 +3,8 @@ const path = require('path');
 const security = require('./security.cjs');
 const { loginPromiseApi } = require('./fca-login.cjs');
 const { installDelayedSendMessage } = require('./delayed-send-message.cjs');
+const { createEventDeduper } = require('./event-dedupe.cjs');
+const isDuplicateMessageEvent = createEventDeduper();
 
 function prepareFcaRuntimeConfig() {
   const configPath = path.join(process.cwd(), 'fca-config.json');
@@ -802,6 +804,14 @@ async function startListening(api) {
 
         const type =
           event.type || 'unknown';
+
+        if (
+          (type === 'message' || type === 'message_reply') &&
+          isDuplicateMessageEvent(event)
+        ) {
+          console.log('[الث] تم تجاهل إعادة تسليم رسالة مكررة.');
+          return;
+        }
 
         if (
           type !== 'typ' &&
