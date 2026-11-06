@@ -11,7 +11,7 @@ const commandProfile = getBotCommandProfile();
 const commandName = commandProfile.jareed.commandName;
 const commandAliases = [...commandProfile.jareed.aliases];
 // Both services historically use this key on their separate existing volumes.
-const stateCommandName = ['جودي', 'جواد'].includes(commandName) ? commandName : 'جريد';
+const stateCommandName = ['جودي', 'جواد', 'جود'].includes(commandName) ? commandName : 'جريد';
 const MAX_DELAY_SECONDS = 24 * 60 * 60;
 const MAX_RECIPIENTS = 10;
 const MAX_THREAD_RESULTS = 100;
@@ -292,6 +292,7 @@ function isValidSavedSchedule(schedule) {
 module.exports = {
   name: commandName,
   aliases: commandAliases,
+  stateCommandName,
   description: 'إرسال رسالة متكررة إلى محادثة أو أشخاص محددين من الخاص حتى الإيقاف اليدوي',
   async execute(api, event) {
     const threadID = String(event.threadID || '');
