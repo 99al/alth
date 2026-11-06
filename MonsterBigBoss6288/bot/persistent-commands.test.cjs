@@ -485,3 +485,25 @@ test('fourth BOT_COMMAND_PROFILE loads and routes /na and جين without prior s
   assert.equal(report.profile.jareed.commandName, 'جين');
   assert.deepEqual(report.routed, [['na', '/na status'], ['جين', 'جين 1 1 نص']]);
 });
+
+
+test('eighth BOT_COMMAND_PROFILE registers and routes موعد/لقب only, not seventh names', () => {
+  const env = { ...process.env, NODE_ENV: 'test', BOT_COMMAND_PROFILE: 'eighth', ALTH_COMMAND_STATE_PATH: path.join(os.tmpdir(), `alth-eighth-profile-${process.pid}`, 'state.json') };
+  const script = [
+    "const { loadCommands, commands, handleMessage } = require('./main');",
+    "const { getBotCommandProfile } = require('./bot-command-profile.cjs');",
+    'const profile = getBotCommandProfile(); loadCommands();',
+    'const routed = []; const map = new Map([[profile.groupTitle.commandName, { execute: () => routed.push(profile.groupTitle.commandName) }], [profile.jareed.commandName, { execute: () => routed.push(profile.jareed.commandName) }]]);',
+    "const api = { sendMessage: async () => {} }; const deps = { commands: map, isAdmin: () => true, isCommandEnabled: () => true, commandProfile: profile };",
+    "Promise.resolve().then(() => handleMessage(api, { body: 'لقب اسم', threadID: 'eighth', senderID: 'admin' }, deps)).then(() => handleMessage(api, { body: 'موعد 1 1 نص', threadID: 'eighth', senderID: 'admin' }, deps)).then(() => handleMessage(api, { body: 'عنوان اسم', threadID: 'eighth', senderID: 'admin' }, deps)).then(() => handleMessage(api, { body: 'جود 1 1 نص', threadID: 'eighth', senderID: 'admin' }, deps)).then(() => console.log('PROFILE_RESULT:' + JSON.stringify({ names: [...commands.keys()], routed }))).catch(error => { console.error(error); process.exitCode = 1; });"
+  ].join('\n');
+  const output = execFileSync(process.execPath, ['-e', script], { cwd: __dirname, env, encoding: 'utf8' });
+  const result = output.match(/PROFILE_RESULT:(\{[^\n]+\})/);
+  assert.ok(result, 'child process reports registered and routed eighth commands');
+  const report = JSON.parse(result[1]);
+  assert.ok(report.names.includes('موعد'));
+  assert.ok(report.names.includes('لقب'));
+  assert.equal(report.names.includes('جود'), false);
+  assert.equal(report.names.includes('عنوان'), false);
+  assert.deepEqual(report.routed, ['لقب', 'موعد']);
+});

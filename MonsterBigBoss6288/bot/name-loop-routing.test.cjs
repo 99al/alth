@@ -183,14 +183,14 @@ test('كل BOT_COMMAND_PROFILE routes its configured group-title command', () =>
     "const api = { sendMessage: async () => {} };",
     "Promise.resolve(handleMessage(api, { body: profile.groupTitle.commandName + ' اسم', threadID: 'profile-test', senderID: 'admin' }, { commands: commandMap, isAdmin: () => true, isCommandEnabled: () => true })).then(() => console.log(JSON.stringify({ registered: commands.has(profile.groupTitle.commandName), calls })));"
   ].join('\n');
-  for (const profile of ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh']) {
+  for (const profile of ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth']) {
     const output = execFileSync(process.execPath, ['-e', script], {
       cwd: __dirname,
       env: { ...process.env, NODE_ENV: 'test', BOT_COMMAND_PROFILE: profile },
       encoding: 'utf8'
     });
     const result = output.trim().split('\n').find(line => line.startsWith('{'));
-    const expectedName = profile === 'seventh' ? 'عنوان' : 'قروب';
+    const expectedName = profile === 'seventh' ? 'عنوان' : profile === 'eighth' ? 'لقب' : 'قروب';
     assert.deepEqual(JSON.parse(result), { registered: true, calls: [expectedName] }, profile);
   }
 });

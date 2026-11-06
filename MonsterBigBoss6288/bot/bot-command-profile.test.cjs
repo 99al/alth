@@ -8,7 +8,8 @@ const expected = {
   third: ['nms', 'جينو', [], ['جينو البوت']],
   fourth: ['na', 'جين', [], []],
   fifth: ['nm5', 'جودي', [], []],
-  sixth: ['nm6', 'جواد', [], []]
+  sixth: ['nm6', 'جواد', [], []],
+  eighth: ['nm', 'موعد', ['namemute', 'غلق', 'lockname'], []]
 };
 for (const [id, [nm, jareed, nmAliases, jareedAliases]] of Object.entries(expected)) {
   test(`${id} profile remains unchanged`, () => {
@@ -18,7 +19,7 @@ for (const [id, [nm, jareed, nmAliases, jareedAliases]] of Object.entries(expect
     assert.deepEqual([...profile.nm.aliases], nmAliases);
     assert.equal(profile.jareed.commandName, jareed);
     assert.deepEqual([...profile.jareed.aliases], jareedAliases);
-    assert.equal(profile.groupTitle.commandName, 'قروب');
+    assert.equal(profile.groupTitle.commandName, id === 'eighth' ? 'لقب' : 'قروب');
   });
 }
 test('seventh profile keeps Bot 1 nm, renames scheduler and group-title commands', () => {
@@ -56,4 +57,32 @@ test('seventh group-title command exports عنوان, parses its name, and persi
   });
   assert.equal(sent.length, 1);
   assert.match(sent[0], /عنوان اسم المجموعة/u);
+});
+
+test('eighth profile exports موعد with its own state key and rejects جود', async () => {
+  process.env.BOT_COMMAND_PROFILE = 'eighth';
+  const path = require.resolve('./Commands/جريد.js');
+  delete require.cache[path];
+  const command = require(path);
+  assert.equal(command.name, 'موعد');
+  assert.deepEqual(command.aliases, []);
+  assert.equal(command.stateCommandName, 'موعد');
+  const sent = [];
+  const api = { sendMessage: async (message, threadID) => sent.push({ message, threadID }) };
+  await command.execute(api, { threadID: 'eighth-thread', senderID: 'sender', isGroup: true, body: 'جود invalid' });
+  assert.deepEqual(sent, []);
+  await command.execute(api, { threadID: 'eighth-thread', senderID: 'sender', isGroup: true, body: 'موعد invalid' });
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].message, /الصيغة/u);
+});
+test('eighth group-title command exports لقب and help mentions its title syntax', async () => {
+  process.env.BOT_COMMAND_PROFILE = 'eighth';
+  const path = require.resolve('./Commands/قروب.js');
+  delete require.cache[path];
+  const command = require(path);
+  assert.equal(command.name, 'لقب');
+  const sent = [];
+  await command.execute({ sendMessage: async message => sent.push(message) }, { body: 'لقب', threadID: 'eighth-title-test' });
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /لقب اسم المجموعة/u);
 });
