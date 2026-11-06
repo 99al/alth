@@ -75,7 +75,7 @@ function loadCommands() {
 
   const files = fs
     .readdirSync(commandsPath)
-    .filter(f => f.endsWith('.js') && f !== 'قروب.js');
+    .filter(f => f.endsWith('.js'));
 
   commandRegistry.clear();
 
@@ -298,6 +298,17 @@ async function handleMessage(api, event, dependencies = {}) {
     return;
   }
 
+  // ─── أمر تغيير عنوان المجموعة حسب ملف الخدمة ───
+  const groupTitleName = commandProfile.groupTitle.commandName;
+  if (body === groupTitleName || body.startsWith(`${groupTitleName} `)) {
+    if (!canAdmin(senderID) || !commandEnabled(groupTitleName)) return;
+    const cmd = commands.get(groupTitleName);
+    if (cmd && typeof cmd.execute === 'function') {
+      Promise.resolve(cmd.execute(api, event)).catch(() => console.error('[الث] تعذر تنفيذ أمر عنوان المجموعة.'));
+    }
+    return;
+  }
+
   // ─── إيقاف حلقات تغيير الأسماء في المحادثة الحالية ───
   if (/^(?:إيقاف|ايقاف) الاسم$/u.test(body)) {
     if (!canAdmin(senderID)) {
@@ -512,7 +523,7 @@ function cancelActiveNameLoops(threadID, commandMap = commandRegistry, options =
   let cancelled = 0;
   let persistenceFailures = 0;
 
-  for (const name of ['هويه', 'قروب', 'كاتش']) {
+  for (const name of ['هويه', serviceCommandProfile.groupTitle.commandName, 'كاتش']) {
     const command = commandMap.get(name);
     if (!command) continue;
 
@@ -540,7 +551,7 @@ function cancelActiveNameLoops(threadID, commandMap = commandRegistry, options =
 
 function pausePersistentCommands(commandMap = commandRegistry) {
   let paused = 0;
-  for (const name of ['ويس', serviceCommandProfile.jareed.commandName, 'هويه', 'قروب', 'كاتش']) {
+  for (const name of ['ويس', serviceCommandProfile.jareed.commandName, 'هويه', serviceCommandProfile.groupTitle.commandName, 'كاتش']) {
     const command = commandMap.get(name);
     if (!command || typeof command.pauseAll !== 'function') continue;
     try {
@@ -556,7 +567,7 @@ function pausePersistentCommands(commandMap = commandRegistry) {
 
 function resumePersistentCommands(api, commandMap = commandRegistry) {
   let resumed = 0;
-  for (const name of ['ويس', serviceCommandProfile.jareed.commandName, 'هويه', 'قروب', 'كاتش']) {
+  for (const name of ['ويس', serviceCommandProfile.jareed.commandName, 'هويه', serviceCommandProfile.groupTitle.commandName, 'كاتش']) {
     const command = commandMap.get(name);
     if (!command || typeof command.resumeAll !== 'function') continue;
     try {

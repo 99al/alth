@@ -4,37 +4,44 @@ const profiles = Object.freeze({
   first: Object.freeze({
     id: 'first',
     nm: Object.freeze({ commandName: 'nm', aliases: Object.freeze(['namemute', 'غلق', 'lockname']) }),
-    jareed: Object.freeze({ commandName: 'جريد', aliases: Object.freeze(['جرائد', 'جريد البوت']) })
+    jareed: Object.freeze({ commandName: 'جريد', aliases: Object.freeze(['جرائد', 'جريد البوت']) }),
+    groupTitle: Object.freeze({ commandName: 'قروب' })
   }),
   second: Object.freeze({
     id: 'second',
     nm: Object.freeze({ commandName: 'nmm', aliases: Object.freeze([]) }),
-    jareed: Object.freeze({ commandName: 'جريدة', aliases: Object.freeze(['جريدة البوت']) })
+    jareed: Object.freeze({ commandName: 'جريدة', aliases: Object.freeze(['جريدة البوت']) }),
+    groupTitle: Object.freeze({ commandName: 'قروب' })
   }),
   third: Object.freeze({
     id: 'third',
     nm: Object.freeze({ commandName: 'nms', aliases: Object.freeze([]) }),
-    jareed: Object.freeze({ commandName: 'جينو', aliases: Object.freeze(['جينو البوت']) })
+    jareed: Object.freeze({ commandName: 'جينو', aliases: Object.freeze(['جينو البوت']) }),
+    groupTitle: Object.freeze({ commandName: 'قروب' })
   }),
   fourth: Object.freeze({
     id: 'fourth',
     nm: Object.freeze({ commandName: 'na', aliases: Object.freeze([]) }),
-    jareed: Object.freeze({ commandName: 'جين', aliases: Object.freeze([]) })
+    jareed: Object.freeze({ commandName: 'جين', aliases: Object.freeze([]) }),
+    groupTitle: Object.freeze({ commandName: 'قروب' })
   }),
   fifth: Object.freeze({
     id: 'fifth',
     nm: Object.freeze({ commandName: 'nm5', aliases: Object.freeze([]) }),
-    jareed: Object.freeze({ commandName: 'جودي', aliases: Object.freeze([]) })
+    jareed: Object.freeze({ commandName: 'جودي', aliases: Object.freeze([]) }),
+    groupTitle: Object.freeze({ commandName: 'قروب' })
   }),
   sixth: Object.freeze({
     id: 'sixth',
     nm: Object.freeze({ commandName: 'nm6', aliases: Object.freeze([]) }),
-    jareed: Object.freeze({ commandName: 'جواد', aliases: Object.freeze([]) })
+    jareed: Object.freeze({ commandName: 'جواد', aliases: Object.freeze([]) }),
+    groupTitle: Object.freeze({ commandName: 'قروب' })
   }),
   seventh: Object.freeze({
     id: 'seventh',
-    nm: Object.freeze({ commandName: 'nm7', aliases: Object.freeze([]) }),
-    jareed: Object.freeze({ commandName: 'جود', aliases: Object.freeze([]) })
+    nm: Object.freeze({ commandName: 'nm', aliases: Object.freeze(['namemute', 'غلق', 'lockname']) }),
+    jareed: Object.freeze({ commandName: 'جود', aliases: Object.freeze([]) }),
+    groupTitle: Object.freeze({ commandName: 'عنوان' })
   })
 });
 

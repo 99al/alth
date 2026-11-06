@@ -1,5 +1,6 @@
 const { createThreadRunRegistry } = require('../name-loop-registry.cjs');
 const commandState = require('../command-state.cjs').defaultStore;
+const commandName = require('../bot-command-profile.cjs').getBotCommandProfile().groupTitle.commandName;
 
 const MIN_DELAY_SECONDS = 5;
 const MAX_DELAY_SECONDS = 10;
@@ -18,7 +19,7 @@ async function getCurrentGroupName(api, threadID) {
       if (info && typeof info.name === 'string') return info.name;
     }
   } catch {
-    console.error('[قروب] تعذر قراءة اسم المجموعة.');
+    console.error(`[${commandName}] تعذر قراءة اسم المجموعة.`);
   }
   return null;
 }
@@ -26,13 +27,13 @@ async function getCurrentGroupName(api, threadID) {
 async function changeGroupName(api, threadID, groupName) {
   try {
     if (!api || typeof api.setTitle !== 'function') {
-      console.error('[قروب] واجهة setTitle غير متاحة في اتصال البوت.');
+      console.error(`[${commandName}] واجهة setTitle غير متاحة في اتصال البوت.`);
       return false;
     }
     await api.setTitle(groupName, threadID);
     return true;
   } catch {
-    console.error('[قروب] تعذر تغيير اسم المجموعة؛ ستستمر الحماية في المحاولة.');
+    console.error(`[${commandName}] تعذر تغيير اسم المجموعة؛ ستستمر الحماية في المحاولة.`);
     return false;
   }
 }
@@ -49,7 +50,7 @@ function startProtection(run, api, threadID, groupName) {
       if (currentName === null || currentName !== groupName) {
         const success = await changeGroupName(api, threadID, groupName);
         if (success && activeRuns.isActive(run)) {
-          console.log(`[قروب] أُعيد اسم المجموعة المحمي في ${threadID}.`);
+          console.log(`[${commandName}] أُعيد اسم المجموعة المحمي في ${threadID}.`);
         }
       }
     } finally {
@@ -57,7 +58,7 @@ function startProtection(run, api, threadID, groupName) {
     }
   };
 
-  console.log(`[قروب] بدأت حماية اسم المجموعة في ${threadID} حتى الإيقاف اليدوي.`);
+  console.log(`[${commandName}] بدأت حماية اسم المجموعة في ${threadID} حتى الإيقاف اليدوي.`);
   void reconcile();
   activeRuns.scheduleInterval(run, () => { void reconcile(); }, CHECK_INTERVAL);
 }
@@ -67,16 +68,16 @@ function isValidSavedGroupName(entry) {
 }
 
 module.exports = {
-  name: 'قروب',
+  name: commandName,
   description: 'تغيير اسم المجموعة وحمايته حتى إيقافه يدويًا',
 
   async execute(api, event) {
     const threadID = String(event && event.threadID || '');
     const body = String(event && event.body || '').trim();
-    const groupName = body.startsWith('قروب ') ? body.slice('قروب '.length).trim() : '';
+    const groupName = body.startsWith(`${commandName} `) ? body.slice(commandName.length + 1).trim() : '';
 
     if (!groupName) {
-      await api.sendMessage('⚠️ الصيغة الصحيحة:\nقروب اسم المجموعة', threadID);
+      await api.sendMessage(`⚠️ الصيغة الصحيحة:\n${commandName} اسم المجموعة`, threadID);
       return;
     }
 
@@ -97,9 +98,9 @@ module.exports = {
       await changeGroupName(api, threadID, groupName);
       if (!activeRuns.isActive(run)) return;
       startProtection(run, api, threadID, groupName);
-      console.log(`[قروب] تم تطبيق الاسم المطلوب في ${threadID}.`);
+      console.log(`[${commandName}] تم تطبيق الاسم المطلوب في ${threadID}.`);
     } catch {
-      console.error('[قروب] تعذر تنفيذ تغيير اسم المجموعة.');
+      console.error(`[${commandName}] تعذر تنفيذ تغيير اسم المجموعة.`);
       if (activeRuns.isActive(run)) startProtection(run, api, threadID, groupName);
     }
   },
@@ -107,7 +108,7 @@ module.exports = {
   resumeAll(api) {
     let saved;
     try { saved = commandState.getAll('قروب'); } catch {
-      console.error('[قروب] تعذر قراءة حمايات أسماء المجموعات المحفوظة.');
+      console.error(`[${commandName}] تعذر قراءة حمايات أسماء المجموعات المحفوظة.`);
       return 0;
     }
     let resumed = 0;
@@ -132,7 +133,7 @@ module.exports = {
       const wasSaved = commandState.remove('قروب', key);
       return wasActive || wasSaved;
     } catch {
-      console.error('[قروب] تعذر حفظ إيقاف حماية اسم المجموعة.');
+      console.error(`[${commandName}] تعذر حفظ إيقاف حماية اسم المجموعة.`);
       const error = new Error('Could not persist manual stop.');
       error.code = 'COMMAND_STATE_WRITE_FAILED';
       error.cancelled = wasActive;
@@ -143,7 +144,7 @@ module.exports = {
   cancelAll() {
     const wasActive = activeRuns.cancelAll();
     try { return Math.max(wasActive, commandState.clear('قروب')); } catch {
-      console.error('[قروب] تعذر حفظ إيقاف حمايات أسماء المجموعات.');
+      console.error(`[${commandName}] تعذر حفظ إيقاف حمايات أسماء المجموعات.`);
       return wasActive;
     }
   }

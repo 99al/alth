@@ -127,7 +127,7 @@ test('dispatcher routes هويه and alias هوية to their loaded command', as
   ]);
 });
 
-test('قروب لا يوجه أمراً، مع بقاء صيغة مجموعة 2 في كاتش', async t => {
+test('قروب routes its configured title handler, while مجموعة 2 remains in كاتش', async t => {
   const dispatched = [];
   const legacyThread = 'thread-legacy-group2';
   t.after(() => katchCommand.getProtectedGroupNames2().delete(legacyThread));
@@ -161,7 +161,7 @@ test('قروب لا يوجه أمراً، مع بقاء صيغة مجموعة 2 
     fs.readFileSync = originalReadFileSync;
   }
 
-  assert.deepEqual(dispatched, []);
+  assert.deepEqual(dispatched, [{ name: 'قروب', body: 'قروب اسم محمي' }]);
   assert.deepEqual(calls.groupNames, [
     { groupName: 'اسم سابق', threadID: legacyThread }
   ]);
@@ -172,29 +172,28 @@ test('قروب لا يوجه أمراً، مع بقاء صيغة مجموعة 2 
   });
 });
 
-test('كل BOT_COMMAND_PROFILE لا يسجل ولا يوجه قروب ويحافظ على أوامر الخدمة', () => {
+test('كل BOT_COMMAND_PROFILE routes its configured group-title command', () => {
   const script = [
     "const { loadCommands, commands, handleMessage } = require('./main');",
     "const { getBotCommandProfile } = require('./bot-command-profile.cjs');",
     'loadCommands();',
     'const profile = getBotCommandProfile();',
-    "const calls = [];",
-    "const commandMap = new Map([['قروب', { execute: () => calls.push('قروب') }], [profile.nm.commandName, { execute: () => calls.push(profile.nm.commandName) }], [profile.jareed.commandName, { execute: () => calls.push(profile.jareed.commandName) }]]);",
+    'const calls = [];',
+    "const commandMap = new Map([[profile.groupTitle.commandName, { execute: () => calls.push(profile.groupTitle.commandName) }], [profile.nm.commandName, { execute: () => calls.push(profile.nm.commandName) }], [profile.jareed.commandName, { execute: () => calls.push(profile.jareed.commandName) }]]);",
     "const api = { sendMessage: async () => {} };",
-    "Promise.resolve(handleMessage(api, { body: 'قروب اسم', threadID: 'profile-test', senderID: 'admin' }, { commands: commandMap, isAdmin: () => true, isCommandEnabled: () => true })).then(() => handleMessage(api, { body: 'مجموعة اسم', threadID: 'profile-test', senderID: 'admin' }, { commands: commandMap, isAdmin: () => true, isCommandEnabled: () => true })).then(() => console.log(JSON.stringify({ registered: commands.has('قروب'), calls })));"
+    "Promise.resolve(handleMessage(api, { body: profile.groupTitle.commandName + ' اسم', threadID: 'profile-test', senderID: 'admin' }, { commands: commandMap, isAdmin: () => true, isCommandEnabled: () => true })).then(() => console.log(JSON.stringify({ registered: commands.has(profile.groupTitle.commandName), calls })));"
   ].join('\n');
-
-  for (const profile of ['first', 'second', 'third', 'fourth', 'fifth', 'sixth']) {
+  for (const profile of ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh']) {
     const output = execFileSync(process.execPath, ['-e', script], {
       cwd: __dirname,
       env: { ...process.env, NODE_ENV: 'test', BOT_COMMAND_PROFILE: profile },
       encoding: 'utf8'
     });
     const result = output.trim().split('\n').find(line => line.startsWith('{'));
-    assert.deepEqual(JSON.parse(result), { registered: false, calls: [] }, profile);
+    const expectedName = profile === 'seventh' ? 'عنوان' : 'قروب';
+    assert.deepEqual(JSON.parse(result), { registered: true, calls: [expectedName] }, profile);
   }
 });
-
 test('إيقاف الاسم cancels nickname and group-name loops only in the current thread', async t => {
   withMockTimers(t);
 

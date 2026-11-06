@@ -18,15 +18,17 @@ for (const [id, [nm, jareed, nmAliases, jareedAliases]] of Object.entries(expect
     assert.deepEqual([...profile.nm.aliases], nmAliases);
     assert.equal(profile.jareed.commandName, jareed);
     assert.deepEqual([...profile.jareed.aliases], jareedAliases);
+    assert.equal(profile.groupTitle.commandName, 'قروب');
   });
 }
-test('seventh profile has isolated names and no legacy aliases', () => {
+test('seventh profile keeps Bot 1 nm, renames scheduler and group-title commands', () => {
   const profile = getBotCommandProfile({ BOT_COMMAND_PROFILE: 'seventh' });
-  assert.deepEqual(profile.nm, { commandName: 'nm7', aliases: [] });
+  assert.deepEqual(profile.nm, { commandName: 'nm', aliases: ['namemute', 'غلق', 'lockname'] });
   assert.deepEqual(profile.jareed, { commandName: 'جود', aliases: [] });
-  assert.equal(getBotCommandProfile({ BOT_COMMAND_PROFILE: 'seventh' }).id, 'seventh');
+  assert.deepEqual(profile.groupTitle, { commandName: 'عنوان' });
+  assert.equal(Object.values(profile).some(value => value && value.commandName === 'nm7'), false);
 });
-test('seventh scheduler exports only its selected command and uses its own state key', async () => {
+test('seventh scheduler exports selected command and uses its own state key', async () => {
   process.env.BOT_COMMAND_PROFILE = 'seventh';
   const path = require.resolve('./Commands/جريد.js');
   delete require.cache[path];
@@ -41,4 +43,17 @@ test('seventh scheduler exports only its selected command and uses its own state
   await command.execute(api, { threadID: 'test-thread', senderID: 'sender', isGroup: true, body: 'جود invalid' });
   assert.equal(sent.length, 1);
   assert.match(sent[0].message, /الصيغة/u);
+});
+test('seventh group-title command exports عنوان, parses its name, and persists under قروب', async () => {
+  process.env.BOT_COMMAND_PROFILE = 'seventh';
+  const path = require.resolve('./Commands/قروب.js');
+  delete require.cache[path];
+  const command = require(path);
+  assert.equal(command.name, 'عنوان');
+  const sent = [];
+  await command.execute({ sendMessage: async message => sent.push(message) }, {
+    body: 'عنوان', threadID: 'profile-title-test'
+  });
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /عنوان اسم المجموعة/u);
 });
