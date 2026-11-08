@@ -6,6 +6,9 @@ const { createAdminIdHandler, commandEntries } = require('./admin-id-commands.cj
 const { getBotCommandProfile } = require('./bot-command-profile.cjs');
 const serviceCommandProfile = getBotCommandProfile();
 const adminIdHandler = createAdminIdHandler({ store: adminStore });
+const memberQueue = serviceCommandProfile.id === 'second'
+  ? require('./member-compensation.cjs').createMemberQueue({ enabled: true, getAdminIDs: () => [...adminStore.load()] })
+  : null;
 
 // ─── قراءة المشرفين من ملف admins-config.json ───
 function loadAdmins(configPath = path.join(__dirname, 'admins-config.json')) {
@@ -154,6 +157,8 @@ async function handleMessage(api, event, dependencies = {}) {
   const senderID = String(
     event.senderID || ''
   );
+
+  if (memberQueue && await memberQueue.command(api, event, canAdmin)) return;
 
   // إدارة المشرفين بالأيدي قبل متابعة جريد، العداد، الردود والتفاعلات.
   if (adminCommands && typeof adminCommands.handle === 'function' &&
@@ -579,6 +584,10 @@ function stopNmCommand() {
 
 // ─── معالجة الأحداث العامة ───
 function handleEvent(api, event) {
+  if (memberQueue) {
+    Promise.resolve(memberQueue.onEvent(api, event))
+      .catch(() => console.error('[الث] تعذر معالجة حدث تعويض الأعضاء.'));
+  }
   const command = commandRegistry.get('كاتش');
   if (!command || !event) return;
   try {
