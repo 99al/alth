@@ -24,7 +24,12 @@ function defaultDataFile(env = process.env) {
   const railwayKeys = ['RAILWAY_ENVIRONMENT', 'RAILWAY_PROJECT_ID', 'RAILWAY_SERVICE_ID'];
   const isProduction = railwayKeys.some(key => typeof env[key] === 'string' && env[key].trim() !== '') ||
     !['development', 'test'].includes(env.NODE_ENV);
-  if (isProduction) return path.join('/data', 'alth-command-state', 'nmData.json');
+  if (isProduction) {
+    const stateDirectory = String(env.BOT_COMMAND_PROFILE || '').trim().toLowerCase() === 'tenth'
+      ? 'alth-tenth-command-state'
+      : 'alth-command-state';
+    return path.join('/data', stateDirectory, 'nmData.json');
+  }
   if (env.NODE_ENV === 'test') return path.join(os.tmpdir(), `alth-nm-state-${process.pid}`, 'nmData.json');
   return path.join(os.homedir(), '.alth-command-state', 'nmData.json');
 }

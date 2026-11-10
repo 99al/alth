@@ -2,13 +2,16 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { getBotCommandProfile } = require('./bot-command-profile.cjs');
+const { resolveStatePath } = require('./command-state.cjs');
 const expected = {
   first: ['nm', 'جريد', ['namemute', 'غلق', 'lockname'], ['جرائد', 'جريد البوت']],
   second: ['nmm', 'جريدة', [], ['جريدة البوت']],
   third: ['nms', 'جينو', [], ['جينو البوت']],
   fourth: ['na', 'جين', [], []],
   fifth: ['nm5', 'جودي', [], []],
-  sixth: ['nm6', 'جواد', [], []]
+  sixth: ['nm6', 'جواد', [], []],
+  seventh: ['nm', 'جود', ['namemute', 'غلق', 'lockname'], []],
+  tenth: ['nm', 'جود', ['namemute', 'غلق', 'lockname'], []]
 };
 for (const [id, [nm, jareed, nmAliases, jareedAliases]] of Object.entries(expected)) {
   test(`${id} profile remains unchanged`, () => {
@@ -18,7 +21,7 @@ for (const [id, [nm, jareed, nmAliases, jareedAliases]] of Object.entries(expect
     assert.deepEqual([...profile.nm.aliases], nmAliases);
     assert.equal(profile.jareed.commandName, jareed);
     assert.deepEqual([...profile.jareed.aliases], jareedAliases);
-    assert.equal(profile.groupTitle.commandName, 'قروب');
+    assert.equal(profile.groupTitle.commandName, id === 'seventh' || id === 'tenth' ? 'عنوان' : 'قروب');
   });
 }
 test('seventh profile keeps Bot 1 nm, renames scheduler and group-title commands', () => {
@@ -56,4 +59,19 @@ test('seventh group-title command exports عنوان, parses its name, and persi
   });
   assert.equal(sent.length, 1);
   assert.match(sent[0], /عنوان اسم المجموعة/u);
+});
+
+test('tenth profile is an exact command copy of seventh', () => {
+  const seventh = getBotCommandProfile({ BOT_COMMAND_PROFILE: 'seventh' });
+  const tenth = getBotCommandProfile({ BOT_COMMAND_PROFILE: 'tenth' });
+  assert.deepEqual({ nm: tenth.nm, jareed: tenth.jareed, groupTitle: tenth.groupTitle },
+    { nm: seventh.nm, jareed: seventh.jareed, groupTitle: seventh.groupTitle });
+});
+
+test('tenth production command storage is isolated from seventh', () => {
+  const production = { NODE_ENV: 'production' };
+  assert.equal(resolveStatePath({ ...production, BOT_COMMAND_PROFILE: 'seventh' }),
+    '/data/alth-command-state/active-commands.json');
+  assert.equal(resolveStatePath({ ...production, BOT_COMMAND_PROFILE: 'tenth' }),
+    '/data/alth-tenth-command-state/active-commands.json');
 });

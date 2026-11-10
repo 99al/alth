@@ -1,0 +1,5 @@
+# Runtime/configuration files are provisioned per Railway service, never committed.
+admins-config.json
+bot-state.json
+commands-config.json
+.admin-state/

@@ -7,6 +7,7 @@ const path = require('node:path');
 
 const STATE_VERSION = 1;
 const PRODUCTION_STATE_PATH = '/data/alth-command-state/active-commands.json';
+const TENTH_PRODUCTION_STATE_PATH = '/data/alth-tenth-command-state/active-commands.json';
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) &&
@@ -20,7 +21,12 @@ function isProductionRuntime(env = process.env) {
 }
 
 function resolveStatePath(env = process.env) {
-  if (isProductionRuntime(env)) return PRODUCTION_STATE_PATH;
+  if (isProductionRuntime(env)) {
+    if (typeof env.ALTH_COMMAND_STATE_PATH === 'string' && env.ALTH_COMMAND_STATE_PATH.trim()) return path.resolve(env.ALTH_COMMAND_STATE_PATH);
+    return String(env.BOT_COMMAND_PROFILE || '').trim().toLowerCase() === 'tenth'
+      ? TENTH_PRODUCTION_STATE_PATH
+      : PRODUCTION_STATE_PATH;
+  }
   if (env.NODE_ENV === 'test') {
     if (typeof env.ALTH_COMMAND_STATE_PATH === 'string' && env.ALTH_COMMAND_STATE_PATH.trim()) {
       return path.resolve(env.ALTH_COMMAND_STATE_PATH);
@@ -214,6 +220,7 @@ const defaultStore = createCommandStateStore();
 
 module.exports = {
   PRODUCTION_STATE_PATH,
+  TENTH_PRODUCTION_STATE_PATH,
   resolveStatePath,
   createCommandStateStore,
   defaultStore

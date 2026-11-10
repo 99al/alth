@@ -378,10 +378,9 @@ app.listen(PORT, () => {
 
 function writeBotState(loggedIn, extra = {}) {
   try {
-    const stateFile = path.join(
-      __dirname,
-      'bot-state.json'
-    );
+    const stateFile = process.env.BOT_STATE_PATH || (String(process.env.BOT_COMMAND_PROFILE || '').trim().toLowerCase() === 'tenth'
+      ? '/data/alth-tenth-command-state/bot-state.json'
+      : path.join(__dirname, 'bot-state.json'));
 
     const state = {
       loggedIn,

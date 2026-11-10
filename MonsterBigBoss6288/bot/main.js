@@ -8,7 +8,7 @@ const serviceCommandProfile = getBotCommandProfile();
 const adminIdHandler = createAdminIdHandler({ store: adminStore });
 
 // ─── قراءة المشرفين من ملف admins-config.json ───
-function loadAdmins(configPath = path.join(__dirname, 'admins-config.json')) {
+function loadAdmins(configPath = process.env.BOT_ADMINS_CONFIG_PATH || path.join(__dirname, 'admins-config.json')) {
   try {
     const raw = fs.readFileSync(configPath, 'utf8');
 
@@ -111,7 +111,9 @@ function isCommandEnabled(name) {
   try {
     const configPath = path.join(
       __dirname,
-      'commands-config.json'
+      process.env.BOT_COMMANDS_CONFIG_PATH || (String(process.env.BOT_COMMAND_PROFILE || '').trim().toLowerCase() === 'tenth'
+        ? '/data/alth-tenth-command-state/commands-config.json'
+        : 'commands-config.json')
     );
 
     if (!fs.existsSync(configPath)) {
