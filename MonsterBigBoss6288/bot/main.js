@@ -75,7 +75,10 @@ function loadCommands() {
 
   const files = fs
     .readdirSync(commandsPath)
-    .filter(f => f.endsWith('.js'));
+    .filter(f => f.endsWith('.js'))
+    .filter(file => serviceCommandProfile.id === 'ninth'
+      ? file !== 'قروب.js'
+      : file !== 'nm9.js');
 
   commandRegistry.clear();
 

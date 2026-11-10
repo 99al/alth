@@ -130,19 +130,21 @@ test('ninth /nm9 invokes the shared group-title handler, not a separate NM handl
   assert.deepEqual(titleCalls, ['nm9 اسم المجموعة الجديد']);
 });
 
-test('ninth command loading registers the shared group-title module under nm9', () => {
+test('ninth command loading registers its dedicated nm9 module without a duplicate group-title command', () => {
   process.env.BOT_COMMAND_PROFILE = 'ninth';
   const mainPath = require.resolve('./main'); delete require.cache[mainPath];
   const main = require(mainPath);
   main.loadCommands();
   assert.equal(main.commands.get('nm9').description, 'تغيير اسم المجموعة وحمايته حتى إيقافه يدويًا');
+  assert.ok(require.cache[require.resolve('./Commands/nm9.js')]);
+  assert.equal(main.commands.get('nm9'), require('./Commands/nm9.js'));
   assert.equal(main.commands.has('قروب'), false);
 });
 
 test('ninth /nm9 group-title module preserves its nm9 state key and setTitle behavior', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   process.env.BOT_COMMAND_PROFILE = 'ninth';
-  const path = require.resolve('./Commands/قروب.js'); delete require.cache[path];
+  const path = require.resolve('./Commands/nm9.js'); delete require.cache[path];
   const command = require(path);
   assert.equal(command.name, 'nm9');
   const state = require('./command-state.cjs').defaultStore;
