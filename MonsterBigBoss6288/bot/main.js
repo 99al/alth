@@ -283,8 +283,8 @@ async function handleMessage(api, event, dependencies = {}) {
     return;
   }
 
-  // Bot9 uses /nm9 for group-title changes, never the standalone name-lock handler.
-  if (commandProfile.id === 'ninth' && /^\/nm9(?:\s|$)/iu.test(body)) {
+  // Retain the legacy Bot9 group-title route only while that profile still names it nm9.
+  if (commandProfile.id === 'ninth' && commandProfile.groupTitle.commandName === 'nm9' && /^\/nm9(?:\s|$)/iu.test(body)) {
     const name = commandProfile.groupTitle.commandName;
     if (!canAdmin(senderID) || !commandEnabled(name)) return;
     const cmd = commands.get(name);
