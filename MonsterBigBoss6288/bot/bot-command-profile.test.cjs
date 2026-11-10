@@ -24,7 +24,7 @@ for (const [id, [nm, jareed, nmAliases, jareedAliases]] of Object.entries(expect
     assert.deepEqual([...profile.nm.aliases], nmAliases);
     assert.equal(profile.jareed.commandName, jareed);
     assert.deepEqual([...profile.jareed.aliases], jareedAliases);
-    assert.equal(profile.groupTitle.commandName, id === 'eighth' ? 'لقب' : 'قروب');
+    assert.equal(profile.groupTitle.commandName, id === 'eighth' ? 'لقب' : id === 'ninth' ? 'nm9' : 'قروب');
   });
 }
 test('seventh profile keeps Bot 1 nm, renames scheduler and group-title commands', () => {
@@ -92,12 +92,12 @@ test('eighth group-title command exports لقب and help mentions its title synt
   assert.match(sent[0], /لقب اسم المجموعة/u);
 });
 
-test('ninth profile keeps سكون and uses قروب for group titles with its existing persistence key', () => {
+test('ninth profile keeps سكون and routes group titles through /nm9 with its existing persistence key', () => {
   const profile = getBotCommandProfile({ BOT_COMMAND_PROFILE: 'ninth' });
   assert.equal(profile.id, 'ninth');
   assert.deepEqual(profile.nm, { commandName: 'nm9', aliases: [] });
   assert.deepEqual(profile.jareed, { commandName: 'سكون', aliases: [] });
-  assert.deepEqual(profile.groupTitle, { commandName: 'قروب', stateKey: 'nm9' });
+  assert.deepEqual(profile.groupTitle, { commandName: 'nm9', stateKey: 'nm9' });
 });
 
 test('ninth scheduler exposes سكون with an isolated durable command key', async () => {
@@ -115,38 +115,36 @@ test('ninth scheduler exposes سكون with an isolated durable command key', as
   assert.match(sent[0], /سكون 10 15/u);
 });
 
-test('ninth قروب invokes the group-title handler and /nm9 no longer changes the group title', async () => {
+test('ninth /nm9 invokes the shared group-title handler, not a separate NM handler', async () => {
   process.env.BOT_COMMAND_PROFILE = 'ninth';
   const { handleMessage } = require('./main');
   const titleCalls = [];
   const commands = new Map([
-    ['قروب', { execute: async (_api, event) => titleCalls.push(event.body) }]
+    ['nm9', { execute: async (_api, event) => titleCalls.push(event.body) }],
+    ['unused-nm-lock', { execute: () => assert.fail('standalone name-lock handler must not run') }]
   ]);
   const dependencies = { commands, isAdmin: id => id === '61593476548155', isCommandEnabled: () => true };
   await handleMessage({ sendMessage: async () => {} }, {
-    body: 'قروب الاسم الجديد', threadID: 'ninth-title-test', senderID: '61593476548155'
-  }, dependencies);
-  assert.deepEqual(titleCalls, ['قروب الاسم الجديد']);
-  await handleMessage({ sendMessage: async () => {} }, {
     body: '/nm9 اسم المجموعة الجديد', threadID: 'ninth-title-test', senderID: '61593476548155'
   }, dependencies);
-  assert.deepEqual(titleCalls, ['قروب الاسم الجديد']);
+  assert.deepEqual(titleCalls, ['nm9 اسم المجموعة الجديد']);
 });
 
-test('ninth command loading registers the group-title handler under قروب', () => {
+test('ninth command loading registers the shared group-title module under nm9', () => {
   process.env.BOT_COMMAND_PROFILE = 'ninth';
   const mainPath = require.resolve('./main'); delete require.cache[mainPath];
   const main = require(mainPath);
   main.loadCommands();
-  assert.equal(main.commands.get('قروب').description, 'تغيير اسم المجموعة وحمايته حتى إيقافه يدويًا');
+  assert.equal(main.commands.get('nm9').description, 'تغيير اسم المجموعة وحمايته حتى إيقافه يدويًا');
+  assert.equal(main.commands.has('قروب'), false);
 });
 
-test('ninth قروب group-title command preserves its nm9 state key and setTitle behavior', async t => {
+test('ninth /nm9 group-title module preserves its nm9 state key and setTitle behavior', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   process.env.BOT_COMMAND_PROFILE = 'ninth';
   const path = require.resolve('./Commands/قروب.js'); delete require.cache[path];
   const command = require(path);
-  assert.equal(command.name, 'قروب');
+  assert.equal(command.name, 'nm9');
   const state = require('./command-state.cjs').defaultStore;
   const threadID = `ninth-title-${process.pid}`;
   const titles = [];
@@ -157,7 +155,7 @@ test('ninth قروب group-title command preserves its nm9 state key and setTitl
       getThreadInfo: async () => ({ threadName: currentTitle }),
       sendMessage: async () => {}
     }, {
-      body: 'قروب اسم المجموعة الجديد', threadID
+      body: 'nm9 اسم المجموعة الجديد', threadID
     });
     t.mock.timers.tick(10000);
     await execution;

@@ -283,8 +283,8 @@ async function handleMessage(api, event, dependencies = {}) {
     return;
   }
 
-  // Retain the legacy Bot9 group-title route only while that profile still names it nm9.
-  if (commandProfile.id === 'ninth' && commandProfile.groupTitle.commandName === 'nm9' && /^\/nm9(?:\s|$)/iu.test(body)) {
+  // Bot9 routes /nm9 through its shared group-title command module.
+  if (commandProfile.id === 'ninth' && /^\/nm9(?:\s|$)/iu.test(body)) {
     const name = commandProfile.groupTitle.commandName;
     if (!canAdmin(senderID) || !commandEnabled(name)) return;
     const cmd = commands.get(name);
