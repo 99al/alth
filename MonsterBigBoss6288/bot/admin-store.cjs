@@ -4,10 +4,15 @@ const fs = require('fs');
 const path = require('path');
 
 const ID_RE = /^[1-9]\d*$/;
-const DEFAULT_CONFIG = path.join(__dirname, 'admins-config.json');
 const FOURTH_PROFILE = 'fourth';
 const FOURTH_CURRENT_ADMIN = '61594703229486';
 const FOURTH_LEGACY_ADMIN = '100041346095449';
+
+function seedPath(env = process.env) {
+  return env.BOT_ADMINS_CONFIG_PATH
+    ? path.resolve(env.BOT_ADMINS_CONFIG_PATH)
+    : path.join(__dirname, 'admins-config.json');
+}
 
 function statePath(env = process.env) {
   if (isProductionRuntime(env)) {
@@ -29,8 +34,14 @@ function hasExplicitStatePath(env = process.env) {
 }
 
 function validId(id) { return typeof id === 'string' && ID_RE.test(id); }
-function readSeed(configPath) {
-  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+function readSeed(configPath, env = process.env) {
+  let raw;
+  try { raw = fs.readFileSync(configPath || seedPath(env), 'utf8'); }
+  catch (error) {
+    if (!error || error.code !== 'ENOENT' || typeof env.BOT_ADMINS_JSON !== 'string') throw error;
+    raw = env.BOT_ADMINS_JSON;
+  }
+  const config = JSON.parse(raw);
   if (!config || typeof config !== 'object' || Array.isArray(config) || !Array.isArray(config.admins) || config.admins.some(id => !validId(id))) throw new Error('INVALID_ADMIN_SEED');
   return [...new Set(config.admins)];
 }
@@ -81,14 +92,15 @@ function shouldMigrateFourthLegacyState(state, configPath, env) {
     ? env.BOT_COMMAND_PROFILE.trim().toLowerCase()
     : '';
   if (profile !== FOURTH_PROFILE || state.revoked.size !== 0 || state.admins.size !== 1 || !state.admins.has(FOURTH_LEGACY_ADMIN)) return false;
-  const seed = readSeed(configPath);
+  const seed = readSeed(configPath, env);
   return seed.length === 1 && seed[0] === FOURTH_CURRENT_ADMIN;
 }
 
-function load(configPath = DEFAULT_CONFIG, env = process.env) {
+function load(configPath, env = process.env) {
+  configPath = configPath || seedPath(env);
   const file = statePath(env);
   try {
-    if (env.NODE_ENV === 'test' && !hasExplicitStatePath(env)) return new Set(readSeed(configPath));
+    if (env.NODE_ENV === 'test' && !hasExplicitStatePath(env)) return new Set(readSeed(configPath, env));
     let stat;
     try { stat = fs.lstatSync(file); }
     catch (error) {
@@ -96,7 +108,7 @@ function load(configPath = DEFAULT_CONFIG, env = process.env) {
       else throw error;
     }
     if (!stat) {
-      const admins = new Set(readSeed(configPath));
+      const admins = new Set(readSeed(configPath, env));
       const state = { admins: [...admins], revoked: [] };
       try { writeJsonAtomic(file, state); } catch { return new Set(); }
       return admins;
@@ -115,7 +127,8 @@ function load(configPath = DEFAULT_CONFIG, env = process.env) {
   }
 }
 
-function change(operation, target, configPath = DEFAULT_CONFIG, env = process.env) {
+function change(operation, target, configPath, env = process.env) {
+  configPath = configPath || seedPath(env);
   if (!validId(target)) return { ok: false, reason: 'target' };
   const file = statePath(env);
   let current;
@@ -127,7 +140,7 @@ function change(operation, target, configPath = DEFAULT_CONFIG, env = process.en
       else throw error;
     }
     if (!stat) {
-      current = { admins: new Set(readSeed(configPath)), revoked: new Set() };
+      current = { admins: new Set(readSeed(configPath, env)), revoked: new Set() };
     } else {
       if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('INVALID_ADMIN_STATE_PATH');
       current = parseState(fs.readFileSync(file, 'utf8'));

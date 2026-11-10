@@ -109,12 +109,12 @@ function loadCommands() {
 // ─── التحقق من تفعيل الأمر ───
 function isCommandEnabled(name) {
   try {
-    const configPath = path.join(
-      __dirname,
-      process.env.BOT_COMMANDS_CONFIG_PATH || (String(process.env.BOT_COMMAND_PROFILE || '').trim().toLowerCase() === 'tenth'
+    const configuredPath = process.env.BOT_COMMANDS_CONFIG_PATH || (String(process.env.BOT_COMMAND_PROFILE || '').trim().toLowerCase() === 'tenth'
         ? '/data/alth-tenth-command-state/commands-config.json'
-        : 'commands-config.json')
-    );
+        : 'commands-config.json');
+    const configPath = path.isAbsolute(configuredPath)
+      ? path.resolve(configuredPath)
+      : path.resolve(__dirname, configuredPath);
 
     if (!fs.existsSync(configPath)) {
       return true;
@@ -609,6 +609,7 @@ function handleEvent(api, event) {
 // ─── تصدير الدوال إلى index.js ───
 module.exports = {
   loadAdmins,
+  isCommandEnabled,
   loadCommands,
   commands: commandRegistry,
   handleMessage,

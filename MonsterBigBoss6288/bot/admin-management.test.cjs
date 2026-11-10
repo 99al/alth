@@ -173,4 +173,29 @@ if (process.env.ADMIN_CHILD) {
       assert.deepEqual(JSON.parse(fs.readFileSync(f.state, 'utf8')), expected);
     }
   });
+  test('BOT_ADMINS_JSON seeds only when seed file is missing and persisted state wins', t => {
+    const f = setup(t);
+    const missing = path.join(f.dir, 'missing-seed.json');
+    const env = { NODE_ENV: 'test', ALTH_ADMIN_STATE_PATH: f.state,
+      BOT_ADMINS_CONFIG_PATH: missing, BOT_ADMINS_JSON: JSON.stringify({ admins: [owner] }) };
+    assert.deepEqual([...store.load(undefined, env)], [owner]);
+    fs.writeFileSync(f.state, JSON.stringify({ admins: [member], revoked: [] }));
+    assert.deepEqual([...store.load(undefined, env)], [member]);
+    fs.writeFileSync(missing, JSON.stringify({ admins: [outsider] }));
+    fs.rmSync(f.state);
+    assert.deepEqual([...store.load(undefined, env)], [outsider]);
+  });
+  test('absolute command config path is read as-is', t => {
+    const f = setup(t);
+    const config = path.join(f.dir, 'commands.json');
+    fs.writeFileSync(config, JSON.stringify({ test_command: { enabled: false } }));
+    const previousPath = process.env.BOT_COMMANDS_CONFIG_PATH;
+    process.env.BOT_COMMANDS_CONFIG_PATH = config;
+    try {
+      assert.equal(require('./main').isCommandEnabled('test_command'), false);
+    } finally {
+      if (previousPath === undefined) delete process.env.BOT_COMMANDS_CONFIG_PATH;
+      else process.env.BOT_COMMANDS_CONFIG_PATH = previousPath;
+    }
+  });
 }
