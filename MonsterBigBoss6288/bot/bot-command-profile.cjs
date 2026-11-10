@@ -48,6 +48,18 @@ const profiles = Object.freeze({
     nm: Object.freeze({ commandName: 'nm', aliases: Object.freeze(['namemute', 'غلق', 'lockname']) }),
     jareed: Object.freeze({ commandName: 'موعد', aliases: Object.freeze([]) }),
     groupTitle: Object.freeze({ commandName: 'لقب' })
+  }),
+  ninth: Object.freeze({
+    id: 'ninth',
+    nm: Object.freeze({ commandName: 'nm9', aliases: Object.freeze([]) }),
+    jareed: Object.freeze({ commandName: 'سكون', aliases: Object.freeze([]) }),
+    groupTitle: Object.freeze({ commandName: 'nm9', stateKey: 'nm9' })
+  }),
+  ninth: Object.freeze({
+    id: 'ninth',
+    nm: Object.freeze({ commandName: 'nm9', aliases: Object.freeze([]) }),
+    jareed: Object.freeze({ commandName: 'سكون', aliases: Object.freeze([]) }),
+    groupTitle: Object.freeze({ commandName: 'nm9', stateKey: 'nm9' })
   })
 });
 
@@ -63,7 +75,8 @@ function getBotCommandProfile(env = process.env) {
   if (requested === 'sixth') return profiles.sixth;
   if (requested === 'seventh') return profiles.seventh;
   if (requested === 'eighth') return profiles.eighth;
-  throw new Error('BOT_COMMAND_PROFILE must be either "first", "second", "third", "fourth", "fifth", "sixth", "seventh", or "eighth".');
+  if (requested === 'ninth') return profiles.ninth;
+  throw new Error('BOT_COMMAND_PROFILE must be either "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", or "ninth".');
 }
 
 module.exports = { getBotCommandProfile };

@@ -68,7 +68,7 @@ function loadCommands() {
     console.error('[الث] تعذر تحميل الأوامر.');
 
     commandRegistry.clear();
-    commandRegistry.set(serviceCommandProfile.nm.commandName, nmCommand);
+    if (serviceCommandProfile.id !== 'ninth') commandRegistry.set(serviceCommandProfile.nm.commandName, nmCommand);
     registerAdminIdCommands();
     return;
   }
@@ -100,7 +100,7 @@ function loadCommands() {
     }
   }
 
-  commandRegistry.set(serviceCommandProfile.nm.commandName, nmCommand);
+  if (serviceCommandProfile.id !== 'ninth') commandRegistry.set(serviceCommandProfile.nm.commandName, nmCommand);
   registerAdminIdCommands();
 
   console.log('[الث] اكتمل تحميل الأوامر.');
@@ -283,6 +283,17 @@ async function handleMessage(api, event, dependencies = {}) {
     return;
   }
 
+  // Bot9 uses /nm9 for group-title changes, never the standalone name-lock handler.
+  if (commandProfile.id === 'ninth' && /^\/nm9(?:\s|$)/iu.test(body)) {
+    const name = commandProfile.groupTitle.commandName;
+    if (!canAdmin(senderID) || !commandEnabled(name)) return;
+    const cmd = commands.get(name);
+    if (cmd && typeof cmd.execute === 'function') {
+      const titleEvent = { ...event, body: `${name}${body.slice(4)}` };
+      Promise.resolve(cmd.execute(api, titleEvent)).catch(() => console.error('[الث] تعذر تنفيذ أمر عنوان المجموعة.'));
+    }
+    return;
+  }
   // ─── أمر قفل اسم المجموعة ───
   if (new RegExp(`^/${commandProfile.nm.commandName}(?:\\s|$)`, 'iu').test(body)) {
     if (!commandEnabled(commandProfile.nm.commandName)) {

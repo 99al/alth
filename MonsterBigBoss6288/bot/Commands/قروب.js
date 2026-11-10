@@ -1,6 +1,8 @@
 const { createThreadRunRegistry } = require('../name-loop-registry.cjs');
 const commandState = require('../command-state.cjs').defaultStore;
-const commandName = require('../bot-command-profile.cjs').getBotCommandProfile().groupTitle.commandName;
+const groupTitleProfile = require('../bot-command-profile.cjs').getBotCommandProfile().groupTitle;
+const commandName = groupTitleProfile.commandName;
+const stateKey = groupTitleProfile.stateKey || 'قروب';
 
 const MIN_DELAY_SECONDS = 5;
 const MAX_DELAY_SECONDS = 10;
@@ -85,7 +87,7 @@ module.exports = {
     if (!run) return;
 
     try {
-      commandState.set('قروب', threadID, { name: groupName });
+      commandState.set(stateKey, threadID, { name: groupName });
     } catch {
       activeRuns.finish(run);
       await api.sendMessage('❌ تعذر حفظ حماية اسم المجموعة في التخزين الدائم؛ لم يبدأ الأمر.', threadID);
@@ -107,7 +109,7 @@ module.exports = {
 
   resumeAll(api) {
     let saved;
-    try { saved = commandState.getAll('قروب'); } catch {
+    try { saved = commandState.getAll(stateKey); } catch {
       console.error(`[${commandName}] تعذر قراءة حمايات أسماء المجموعات المحفوظة.`);
       return 0;
     }
@@ -130,7 +132,7 @@ module.exports = {
     const key = String(threadID);
     const wasActive = activeRuns.cancel(key);
     try {
-      const wasSaved = commandState.remove('قروب', key);
+      const wasSaved = commandState.remove(stateKey, key);
       return wasActive || wasSaved;
     } catch {
       console.error(`[${commandName}] تعذر حفظ إيقاف حماية اسم المجموعة.`);
@@ -143,7 +145,7 @@ module.exports = {
 
   cancelAll() {
     const wasActive = activeRuns.cancelAll();
-    try { return Math.max(wasActive, commandState.clear('قروب')); } catch {
+    try { return Math.max(wasActive, commandState.clear(stateKey)); } catch {
       console.error(`[${commandName}] تعذر حفظ إيقاف حمايات أسماء المجموعات.`);
       return wasActive;
     }
