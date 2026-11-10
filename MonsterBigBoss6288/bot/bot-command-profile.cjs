@@ -54,12 +54,6 @@ const profiles = Object.freeze({
     nm: Object.freeze({ commandName: 'nm9', aliases: Object.freeze([]) }),
     jareed: Object.freeze({ commandName: 'سكون', aliases: Object.freeze([]) }),
     groupTitle: Object.freeze({ commandName: 'nm9', stateKey: 'nm9' })
-  }),
-  ninth: Object.freeze({
-    id: 'ninth',
-    nm: Object.freeze({ commandName: 'nm9', aliases: Object.freeze([]) }),
-    jareed: Object.freeze({ commandName: 'سكون', aliases: Object.freeze([]) }),
-    groupTitle: Object.freeze({ commandName: 'nm9', stateKey: 'nm9' })
   })
 });
 
