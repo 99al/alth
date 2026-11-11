@@ -10,8 +10,8 @@ const { getBotCommandProfile } = require('../bot-command-profile.cjs');
 const commandProfile = getBotCommandProfile();
 const commandName = commandProfile.jareed.commandName;
 const commandAliases = [...commandProfile.jareed.aliases];
-// Both services historically use this key on their separate existing volumes.
-const stateCommandName = ['جودي', 'جواد', 'جود'].includes(commandName) ? commandName : 'جريد';
+// Each configured scheduler command keeps state under its own name.
+const stateCommandName = ['جودي', 'جواد', 'جود', 'دارو'].includes(commandName) ? commandName : 'جريد';
 const MAX_DELAY_SECONDS = 24 * 60 * 60;
 const MAX_RECIPIENTS = 10;
 const MAX_THREAD_RESULTS = 100;

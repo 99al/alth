@@ -46,7 +46,7 @@ const profiles = Object.freeze({
   tenth: Object.freeze({
     id: 'tenth',
     nm: Object.freeze({ commandName: 'nm', aliases: Object.freeze(['namemute', 'غلق', 'lockname']) }),
-    jareed: Object.freeze({ commandName: 'جود', aliases: Object.freeze([]) }),
+    jareed: Object.freeze({ commandName: 'دارو', aliases: Object.freeze([]) }),
     groupTitle: Object.freeze({ commandName: 'عنوان' })
   })
 });

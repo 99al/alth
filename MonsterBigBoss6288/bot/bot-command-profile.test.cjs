@@ -11,7 +11,7 @@ const expected = {
   fifth: ['nm5', 'جودي', [], []],
   sixth: ['nm6', 'جواد', [], []],
   seventh: ['nm', 'جود', ['namemute', 'غلق', 'lockname'], []],
-  tenth: ['nm', 'جود', ['namemute', 'غلق', 'lockname'], []]
+  tenth: ['nm', 'دارو', ['namemute', 'غلق', 'lockname'], []]
 };
 for (const [id, [nm, jareed, nmAliases, jareedAliases]] of Object.entries(expected)) {
   test(`${id} profile remains unchanged`, () => {
@@ -47,6 +47,22 @@ test('seventh scheduler exports selected command and uses its own state key', as
   assert.equal(sent.length, 1);
   assert.match(sent[0].message, /الصيغة/u);
 });
+test('tenth scheduler exports دارو, uses its own state key, and leaves جود inactive', async () => {
+  process.env.BOT_COMMAND_PROFILE = 'tenth';
+  const path = require.resolve('./Commands/جريد.js');
+  delete require.cache[path];
+  const command = require(path);
+  assert.equal(command.name, 'دارو');
+  assert.deepEqual(command.aliases, []);
+  assert.equal(command.stateCommandName, 'دارو');
+  const sent = [];
+  const api = { sendMessage: async (message, threadID) => sent.push({ message, threadID }) };
+  await command.execute(api, { threadID: 'tenth-test-thread', senderID: 'sender', isGroup: true, body: 'جود invalid' });
+  assert.deepEqual(sent, []);
+  await command.execute(api, { threadID: 'tenth-test-thread', senderID: 'sender', isGroup: true, body: 'دارو invalid' });
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].message, /الصيغة: دارو/u);
+});
 test('seventh group-title command exports عنوان, parses its name, and persists under قروب', async () => {
   process.env.BOT_COMMAND_PROFILE = 'seventh';
   const path = require.resolve('./Commands/قروب.js');
@@ -61,11 +77,13 @@ test('seventh group-title command exports عنوان, parses its name, and persi
   assert.match(sent[0], /عنوان اسم المجموعة/u);
 });
 
-test('tenth profile is an exact command copy of seventh', () => {
+test('tenth profile keeps shared commands but uses its own scheduler name', () => {
   const seventh = getBotCommandProfile({ BOT_COMMAND_PROFILE: 'seventh' });
   const tenth = getBotCommandProfile({ BOT_COMMAND_PROFILE: 'tenth' });
-  assert.deepEqual({ nm: tenth.nm, jareed: tenth.jareed, groupTitle: tenth.groupTitle },
-    { nm: seventh.nm, jareed: seventh.jareed, groupTitle: seventh.groupTitle });
+  assert.deepEqual(tenth.nm, seventh.nm);
+  assert.deepEqual(tenth.groupTitle, { commandName: 'عنوان' });
+  assert.deepEqual(seventh.jareed, { commandName: 'جود', aliases: [] });
+  assert.deepEqual(tenth.jareed, { commandName: 'دارو', aliases: [] });
 });
 
 test('tenth production command storage is isolated from seventh', () => {
