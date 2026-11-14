@@ -96,6 +96,46 @@ test('invokes the supplied callback at most once', async () => {
   assert.equal(callbackCount, 1);
 });
 
+test('reports a rejected send once without exposing message or thread arguments', async () => {
+  const failure = { error: 'Connection refused: undefined' };
+  const reports = [];
+  const api = {
+    sendMessage() {
+      return Promise.reject(failure);
+    },
+    sendTypingIndicator() {}
+  };
+
+  installDelayedSendMessage(api, {
+    typingDurationForText: () => 0,
+    postTypingDelayMs: 0,
+    onError: error => reports.push(error)
+  });
+
+  await assert.rejects(api.sendMessage('private message body', 'private-thread'), error => error === failure);
+  assert.deepEqual(reports, [failure]);
+});
+
+test('reports successful sends once and isolates errors thrown by an observer', async () => {
+  const outcomes = [];
+  const api = {
+    sendMessage() {
+      return Promise.resolve({ messageID: 'ok' });
+    },
+    sendTypingIndicator() {}
+  };
+
+  installDelayedSendMessage(api, {
+    typingDurationForText: () => 0,
+    postTypingDelayMs: 0,
+    onError() { throw new Error('observer error'); },
+    onSuccess: result => outcomes.push(result)
+  });
+
+  assert.deepEqual(await api.sendMessage('ok', 'thread-ok'), { messageID: 'ok' });
+  assert.deepEqual(outcomes, [{ messageID: 'ok' }]);
+});
+
 test('rejects synchronous send exceptions', async () => {
   const syncError = new Error('sync failure');
   const api = {

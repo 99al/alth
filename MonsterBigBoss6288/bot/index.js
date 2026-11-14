@@ -3,6 +3,7 @@ const path = require('path');
 const security = require('./security.cjs');
 const { loginPromiseApi } = require('./fca-login.cjs');
 const { installDelayedSendMessage } = require('./delayed-send-message.cjs');
+const { createMqttSendRecovery, stopMqttListener } = require('./mqtt-recovery.cjs');
 
 function prepareFcaRuntimeConfig() {
   const configPath = path.join(process.cwd(), 'fca-config.json');
@@ -260,9 +261,29 @@ let memorySweeperInterval = null;
 let listenerErrorCount = 0;
 let lastReconnectRequest = 0;
 
+const mqttSendRecovery = createMqttSendRecovery({
+  threshold: 3,
+  windowMs: 60_000,
+  cooldownMs: 60_000,
+  onRecovery: () => {
+    console.error('[الث] تكررت أخطاء نقل MQTT؛ ستتم إعادة تهيئة المستمع دون إعادة إرسال الرسائل.');
+    scheduleRestart(Math.min(5000 * (2 ** Math.min(reconnectAttempts, 5)), 120_000));
+  }
+});
+
+function handleBotSendError(error) {
+  const result = mqttSendRecovery.recordFailure(error);
+  if (result.category === 'connection_refused') {
+    console.error('[الث] فشل sendMessage بسبب رفض اتصال النقل.');
+  } else if (result.category === 'connection_unavailable') {
+    console.error('[الث] فشل sendMessage بسبب تعذر اتصال النقل أو انتهاء المهلة.');
+  } else {
+    console.error('[الث] فشل sendMessage؛ حُجبت التفاصيل ولم يُصنّف كتعطل نقل.');
+  }
+}
+
 function requireDashboardAuth(req, res, next) {
   res.setHeader('Cache-Control', 'no-store');
-
   if (!security.authIsConfigured()) {
     return res.status(503).json({ error: 'Dashboard authentication is not configured.' });
   }
@@ -534,7 +555,6 @@ process.on('uncaughtException', () => {
     '[الث] 🟢 استمرار... إعادة الاتصال خلال 10 ثواني'
   );
 
-  isRestarting = false;
   scheduleRestart(10000);
 });
 
@@ -543,22 +563,31 @@ process.on('unhandledRejection', () => {
     '[الث] 🔴 وعد غير معالج (تفاصيل السبب محجوبة)'
   );
 
-  isRestarting = false;
   scheduleRestart(15000);
 });
 
-function shutdownForPlatformSignal(signal) {
+async function shutdownForPlatformSignal(signal) {
   pausePersistentCommands();
   stopNmTimers();
-  if (msgEmitter && typeof msgEmitter.stop === 'function') {
-    try { msgEmitter.stop(); } catch {}
-  }
+  const listenerToStop = msgEmitter;
+  msgEmitter = null;
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   if (appstateSaverInterval) clearInterval(appstateSaverInterval);
   if (memorySweeperInterval) clearInterval(memorySweeperInterval);
   try { if (botApi) saveAppstate(botApi, 'قبل الإيقاف'); } catch {}
   writeBotState(false, { status: 'إيقاف Railway لإعادة التشغيل' });
   console.log(`[الث] استلمت ${signal}؛ حُفظت المهام الدورية وسيُنهى الاتصال لإعادة تشغيل الخدمة.`);
+  let cleanupTimeout;
+  try {
+    await Promise.race([
+      stopMqttListener(listenerToStop),
+      new Promise(resolve => { cleanupTimeout = setTimeout(resolve, 8000); })
+    ]);
+  } catch {
+    console.error('[الث] تعذر تنظيف مستمع MQTT قبل إيقاف الحاوية.');
+  } finally {
+    if (cleanupTimeout) clearTimeout(cleanupTimeout);
+  }
   process.exit(0);
 }
 
@@ -664,7 +693,11 @@ function startBot() {
       isRestarting = false;
       reconnectAttempts = 0;
       botApi = api;
-      installDelayedSendMessage(api);
+      mqttSendRecovery.recordSuccess();
+      installDelayedSendMessage(api, {
+        onError: handleBotSendError,
+        onSuccess: () => mqttSendRecovery.recordSuccess()
+      });
 
       try {
         if (
@@ -776,6 +809,8 @@ async function startListening(api) {
 
     const callback = (err, event) => {
 
+      if (isRestarting) return;
+
       if (err) {
         console.error(
           '[الث] ⚠️ خطأ في الاستماع (تفاصيل الخطأ محجوبة)'
@@ -846,10 +881,12 @@ async function startListening(api) {
       }
     };
 
-    msgEmitter =
-      await api.listenMqtt(
-        callback
-      );
+    const listener = await api.listenMqtt(callback);
+    if (isRestarting) {
+      await stopMqttListener(listener);
+      return;
+    }
+    msgEmitter = listener;
 
     console.log(
       '[الث] 👂 البوت يستمع...'
@@ -868,7 +905,7 @@ async function startListening(api) {
 
 function scheduleRestart(delay) {
 
-  if (isRestarting) return;
+  if (isRestarting) return false;
 
   isRestarting = true;
 
@@ -902,16 +939,7 @@ function scheduleRestart(delay) {
     }
   } catch (e) {}
 
-  try {
-    if (
-      msgEmitter &&
-      typeof msgEmitter.stop ===
-      'function'
-    ) {
-      msgEmitter.stop();
-    }
-  } catch (e) {}
-
+  const listenerToStop = msgEmitter;
   msgEmitter = null;
   botApi = null;
 
@@ -932,13 +960,16 @@ function scheduleRestart(delay) {
     `[الث] ⏳ إعادة الاتصال بعد ${actualDelay / 1000}ث (محاولة ${reconnectAttempts})`
   );
 
-  setTimeout(() => {
-
-    isRestarting = false;
-
-    startBot();
-
-  }, actualDelay);
+  return stopMqttListener(listenerToStop).then(() => {
+    setTimeout(() => {
+      isRestarting = false;
+      startBot();
+    }, actualDelay);
+    return true;
+  }).catch(() => {
+    console.error('[الث] تعذر تنظيف مستمع MQTT؛ أُوقفت إعادة الدخول لتجنب مستمعين متداخلين.');
+    return false;
+  });
 }
 
 startBot();

@@ -3,6 +3,11 @@
 const delayedSendQueues = new Map();
 const DEFAULT_SEND_TIMEOUT_MS = 30_000;
 
+function notify(handler, value) {
+  if (typeof handler !== 'function') return;
+  try { handler(value); } catch {}
+}
+
 function installDelayedSendMessage(api, options = {}) {
   if (!api || typeof api.sendMessage !== 'function') return false;
   if (api.sendMessage.__althDelayedSendMessage === true) return true;
@@ -16,6 +21,8 @@ function installDelayedSendMessage(api, options = {}) {
   const postTypingDelayMs = Number.isFinite(options.postTypingDelayMs) && options.postTypingDelayMs >= 0
     ? options.postTypingDelayMs
     : 1000;
+  const onError = typeof options.onError === 'function' ? options.onError : null;
+  const onSuccess = typeof options.onSuccess === 'function' ? options.onSuccess : null;
   const rawSendMessage = api.sendMessage.bind(api);
 
   const wrappedSendMessage = function (msg, threadID, callback, ...rest) {
@@ -44,6 +51,7 @@ function installDelayedSendMessage(api, options = {}) {
             if (settled) return;
             settled = true;
             clearTimeout(timeout);
+            notify(handler === reject ? onError : onSuccess, value);
             handler(value);
           };
           let callbackCalled = false;
