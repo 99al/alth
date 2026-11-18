@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const privateChatDiagnostics = require('../private-chat-diagnostics.cjs');
 
 const CONFIG_PATH = path.join(__dirname, '..', 'commands-config.json');
 
@@ -23,13 +24,30 @@ module.exports = {
   aliases: ['أوامر', 'اومر البوت', 'أوامر البوت'],
   description: 'عرض أوامر البوت الموجودة وحالتها',
 
-  async execute(api, event) {
+  async execute(api, event, chatDiagnostics = privateChatDiagnostics.diagnostics) {
     const threadID = String(event.threadID);
+    const diagnosticContext = {
+      chat: privateChatDiagnostics.chatKind(event.isGroup),
+      type: privateChatDiagnostics.eventKind(event.type),
+    };
+    const sendReply = async message => {
+      chatDiagnostics.emit('reply_attempted', diagnosticContext);
+      try {
+        await api.sendMessage(message, threadID);
+        chatDiagnostics.emit('reply_succeeded', diagnosticContext);
+      } catch (error) {
+        chatDiagnostics.emit('reply_failed', {
+          ...diagnosticContext,
+          errorType: privateChatDiagnostics.safeErrorType(error),
+        });
+        throw error;
+      }
+    };
     const { commands } = require('../main');
     const loadedCommands = [...commands.values()];
 
     if (loadedCommands.length === 0) {
-      await api.sendMessage('📋 لا توجد أوامر محمّلة حاليًا.', threadID);
+      await sendReply('📋 لا توجد أوامر محمّلة حاليًا.');
       return;
     }
 
@@ -50,6 +68,6 @@ module.exports = {
       '✅ مفعّل   ⛔ معطّل'
     ].join('\n');
 
-    await api.sendMessage(message, threadID);
+    await sendReply(message);
   }
 };
