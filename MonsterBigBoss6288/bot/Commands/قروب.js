@@ -104,10 +104,11 @@ module.exports = {
     }
   },
 
-  resumeAll(api) {
+  resumeAll(api, options = {}) {
     let saved;
     try { saved = commandState.getAll('قروب'); } catch {
       console.error('[قروب] تعذر قراءة حمايات أسماء المجموعات المحفوظة.');
+      if (options.strict) throw new Error('GROUP_NAME_RESUME_STATE_FAILED');
       return 0;
     }
     let resumed = 0;

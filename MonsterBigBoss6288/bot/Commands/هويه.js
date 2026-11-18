@@ -167,10 +167,11 @@ module.exports = {
     }
   },
 
-  resumeAll(api) {
+  resumeAll(api, options = {}) {
     let saved;
     try { saved = commandState.getAll('هويه'); } catch {
       console.error('[هويه] تعذر قراءة حمايات الكنيات المحفوظة.');
+      if (options.strict) throw new Error('NICKNAME_RESUME_STATE_FAILED');
       return 0;
     }
     let resumed = 0;

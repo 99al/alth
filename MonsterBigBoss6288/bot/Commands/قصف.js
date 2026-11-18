@@ -261,12 +261,13 @@ module.exports = {
     try { return commandState.get('ويس', key) === true; } catch { return false; }
   },
 
-  resumeAll(api) {
+  resumeAll(api, options = {}) {
     let saved;
     try {
       saved = commandState.getAll('ويس');
     } catch {
       console.error('[ويس] تعذر قراءة المهام المحفوظة لاستئنافها.');
+      if (options.strict) throw new Error('WIS_RESUME_STATE_FAILED');
       return 0;
     }
     let resumed = 0;
