@@ -63,7 +63,76 @@ test('recognizes only the requested private management command forms', () => {
   assert.equal(parseCommand('حذف مشرف 100000000003').name, 'remove');
   assert.equal(parseCommand('عرض المشرفين').name, 'admins');
   assert.equal(parseCommand('إضافة مشرف 12 abc').invalid, true);
-  assert.equal(parseCommand('اومر'), null);
+  for (const alias of ['أوامر', 'اومر', 'عرض الأوامر', 'عرض الاوامر']) {
+    assert.deepEqual(parseCommand(alias), { name: 'help' });
+  }
+  assert.equal(parseCommand('اومر إضافية'), null);
+});
+
+test('help aliases share the same response, identity gate, admin gate and group exclusion', async () => {
+  for (const alias of ['أوامر', 'اومر', 'عرض الأوامر']) {
+    const f = fixture();
+    assert.equal(await f.handler.handle(f.api, f.event(alias, botID, 'same-private-thread')), true);
+    assert.equal(f.calls.sent.length, 1);
+    assert.equal(f.calls.sent[0].threadID, 'same-private-thread');
+    assert.match(f.calls.sent[0].message, /^أوامر الإدارة الخاصة:/);
+
+    for (const sender of [owner, outsider]) {
+      await f.handler.handle(f.api, f.event(alias, sender));
+      assert.match(f.calls.sent.at(-1).message, /حساب البوت نفسه/);
+      assert.doesNotMatch(f.calls.sent.at(-1).message, /^أوامر الإدارة الخاصة:/);
+    }
+    const noAdmin = fixture({ admins: [owner] });
+    await noAdmin.handler.handle(noAdmin.api, noAdmin.event(alias));
+    assert.match(noAdmin.calls.sent[0].message, /غير مسجل كمشرف/);
+
+    for (const sender of [botID, owner]) {
+      const before = f.calls.sent.length;
+      assert.equal(await f.handler.handle(f.api, f.event(alias, sender, 'group-thread', true)), false);
+      assert.equal(f.calls.sent.length, before);
+    }
+    assert.deepEqual({ starts: f.calls.starts, stops: f.calls.stops, restarts: f.calls.restarts }, { starts: 0, stops: 0, restarts: 0 });
+  }
+});
+
+test('help aliases deduplicate the same message across spellings and never parse the bot help reply', async () => {
+  const f = fixture();
+  for (const alias of ['أوامر', 'اومر', 'عرض الأوامر']) {
+    await f.handler.handle(f.api, f.event(alias, botID, 'same-thread', false, 'same-command-message'));
+  }
+  assert.equal(f.calls.sent.length, 1);
+  const reply = f.calls.sent[0].message;
+  assert.equal(parseCommand(reply), null);
+  assert.equal(await f.handler.handle(f.api, f.event(reply, botID, 'same-thread', false, 'reply-message')), false);
+  assert.equal(f.calls.sent.length, 1);
+  await f.handler.handle(f.api, f.event('اومر', botID, 'same-thread', false, 'new-command-message'));
+  assert.equal(f.calls.sent.length, 2);
+});
+
+test('real main routes self-authored help aliases once and suppresses bot reply echoes', async () => {
+  const main = require('./main.js');
+  const f = fixture();
+  let groupListCalls = 0;
+  const deps = {
+    privateAdminControl: f.handler,
+    botAccountID: botID,
+    isBotPaused: () => false,
+    commands: new Map([['اومر', { execute() { groupListCalls++; } }]]),
+    isCommandEnabled: () => true,
+    isAdmin: () => true
+  };
+  for (const alias of ['أوامر', 'اومر', 'عرض الأوامر']) {
+    const command = f.event(alias, botID);
+    const before = f.calls.sent.length;
+    await main.handleMessage(f.api, command, deps);
+    await main.handleMessage(f.api, command, deps);
+    assert.equal(f.calls.sent.length, before + 1);
+    await main.handleMessage(f.api, f.event(f.calls.sent.at(-1).message, botID), deps);
+    assert.equal(f.calls.sent.length, before + 1);
+    await main.handleMessage(f.api, f.event(alias, botID, 'group-thread', true), deps);
+    assert.equal(f.calls.sent.length, before + 1);
+  }
+  assert.equal(groupListCalls, 0);
 });
 
 test('only the bot identity can issue management commands; replies stay in the exact incoming private thread', async () => {

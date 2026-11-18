@@ -28,6 +28,8 @@ function parseCommand(rawBody) {
     ['حالة البوت', { name: 'status' }],
     ['عرض الأوامر', { name: 'help' }],
     ['عرض الاوامر', { name: 'help' }],
+    ['أوامر', { name: 'help' }],
+    ['اومر', { name: 'help' }],
     ['إضافة مشرف', { name: 'add', missingId: true }],
     ['اضافة مشرف', { name: 'add', missingId: true }],
     ['حذف مشرف', { name: 'remove', missingId: true }],
