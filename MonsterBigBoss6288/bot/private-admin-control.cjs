@@ -13,6 +13,7 @@ const HELP = [
   'حذف مشرف <ID> — سحب صلاحيات حساب.',
   'عرض المشرفين — عرض الحسابات المخولة لهذا البوت.',
   '',
+  'مصدر الأوامر المسموح: حساب البوت نفسه فقط، في محادثة خاصة.',
   'ملاحظة: «إيقاف» لا يطفئ خدمة Railway؛ يبقى اتصال Messenger وبعض صيانة الاتصال والذاكرة قائمًا حتى يمكن تلقي «تشغيل».',
 ].join('\n');
 
@@ -77,6 +78,9 @@ function createPrivateAdminControl({
   }
 
   let lifecycleBusy = false;
+  const seenMessages = new Map();
+  const duplicateWindowMs = 10 * 60 * 1000;
+  const maxSeenMessages = 512;
 
   async function send(api, event, message) {
     if (!api || typeof api.sendMessage !== 'function' || !event?.threadID) return false;
@@ -91,6 +95,24 @@ function createPrivateAdminControl({
   function authorized(senderID) {
     if (!BASIC_ID_RE.test(String(senderID || ''))) return false;
     try { return adminStore.isAdmin(String(senderID)); } catch { return false; }
+  }
+
+  function isRepeatedMessage(event) {
+    const messageID = String(event?.messageID || '').trim();
+    const threadID = String(event?.threadID || '').trim();
+    if (!messageID || messageID.length > 512 || !threadID) return true;
+    const now = clock();
+    for (const [key, timestamp] of seenMessages) {
+      if (now - timestamp > duplicateWindowMs) seenMessages.delete(key);
+      else break;
+    }
+    const key = `${threadID}:${messageID}`;
+    if (seenMessages.has(key)) return true;
+    seenMessages.set(key, now);
+    while (seenMessages.size > maxSeenMessages) {
+      seenMessages.delete(seenMessages.keys().next().value);
+    }
+    return false;
   }
 
   async function lifecycle(api, event, operation) {
@@ -167,14 +189,22 @@ function createPrivateAdminControl({
   }
 
   async function handle(api, event) {
-    // Fail closed: management commands are available only in a confirmed DM.
+    // Fail closed: only the logged-in bot identity may issue these commands in a DM.
     if (!event || event.isGroup !== false) return false;
     const command = parseCommand(event.body);
     if (!command) return false;
     const senderID = String(event.senderID || '');
+    const botID = String(typeof getBotAccountID === 'function' ? getBotAccountID() || '' : '');
+
+    if (!botID || senderID !== botID) {
+      await send(api, event, '⛔ أوامر الإدارة الخاصة تقبل فقط من حساب البوت نفسه وفي محادثة خاصة.');
+      return true;
+    }
+
+    if (isRepeatedMessage(event)) return true;
 
     if (!authorized(senderID)) {
-      await send(api, event, '⛔ هذا الأمر متاح للمشرفين المصرح لهم فقط.');
+      await send(api, event, '⛔ حساب البوت غير مسجل كمشرف؛ لم يُنفذ الأمر.');
       return true;
     }
 

@@ -13,6 +13,7 @@ function fixture({ admins = [owner, botID], paused = false, actions = {} } = {})
   const members = new Set(admins);
   let state = { ok: true, paused, initialized: true };
   const calls = { sent: [], starts: 0, stops: 0, restarts: 0 };
+  let nextMessage = 0;
   const adminStore = {
     load: () => new Set(members),
     isAdmin: id => members.has(String(id)),
@@ -48,7 +49,7 @@ function fixture({ admins = [owner, botID], paused = false, actions = {} } = {})
   };
   const handler = createPrivateAdminControl({ adminStore, controlStore, actions: actionSet, getBotAccountID: () => botID });
   const api = { async sendMessage(message, threadID) { calls.sent.push({ message, threadID: String(threadID) }); } };
-  const event = (body, senderID = owner, threadID = 'dm-admin', isGroup = false) => ({ body, senderID, threadID, isGroup });
+  const event = (body, senderID = botID, threadID = 'dm-admin', isGroup = false, messageID = `message-${++nextMessage}`) => ({ body, senderID, threadID, isGroup, messageID, type: 'message' });
   return { handler, adminStore, controlStore, members, calls, api, event };
 }
 
@@ -65,14 +66,15 @@ test('recognizes only the requested private management command forms', () => {
   assert.equal(parseCommand('اومر'), null);
 });
 
-test('all management replies go to the exact incoming private thread', async () => {
+test('only the bot identity can issue management commands; replies stay in the exact incoming private thread', async () => {
   const f = fixture();
   for (const body of ['عرض الأوامر', 'حالة البوت', 'عرض المشرفين']) {
-    await f.handler.handle(f.api, f.event(body, owner, 'same-dm'));
+    await f.handler.handle(f.api, f.event(body, botID, 'same-dm'));
     assert.equal(f.calls.sent.at(-1).threadID, 'same-dm');
   }
   assert.match(f.calls.sent[0].message, /إيقاف/);
   assert.match(f.calls.sent[0].message, /لا يطفئ خدمة Railway/);
+  assert.match(f.calls.sent[0].message, /حساب البوت نفسه/);
   assert.match(f.calls.sent[1].message, /متصل/);
   assert.match(f.calls.sent[1].message, /مستمع Messenger بدأ/);
   assert.match(f.calls.sent[2].message, new RegExp(owner));
@@ -91,15 +93,38 @@ test('new management commands are not handled or replied to in group chats', asy
   assert.equal(f.members.has(member), false);
 });
 
-test('unauthorized DM gets a denial and cannot change admins or bot state', async () => {
+test('even a saved human admin cannot issue management commands; only the logged-in bot identity is accepted', async () => {
   const f = fixture();
-  for (const body of ['تشغيل', 'إيقاف', 'إعادة تشغيل', 'إضافة مشرف 100000000003', 'حذف مشرف 100000000001']) {
-    assert.equal(await f.handler.handle(f.api, f.event(body, outsider)), true);
-    assert.match(f.calls.sent.at(-1).message, /للمشرفين المصرح لهم فقط/);
+  for (const [body, sender] of [['تشغيل', owner], ['إيقاف', outsider], ['إعادة تشغيل', owner], ['إضافة مشرف 100000000003', outsider], ['حذف مشرف 100000000001', owner]]) {
+    assert.equal(await f.handler.handle(f.api, f.event(body, sender)), true);
+    assert.match(f.calls.sent.at(-1).message, /حساب البوت نفسه/);
   }
   assert.equal(f.members.has(member), false);
   assert.equal(f.controlStore.isPaused(), false);
   assert.deepEqual({ starts: f.calls.starts, stops: f.calls.stops, restarts: f.calls.restarts }, { starts: 0, stops: 0, restarts: 0 });
+});
+
+test('bot identity must also remain enrolled as an admin before a command can execute', async () => {
+  const f = fixture({ admins: [owner] });
+  assert.equal(await f.handler.handle(f.api, f.event('إيقاف', botID)), true);
+  assert.equal(f.controlStore.isPaused(), false);
+  assert.equal(f.calls.stops, 0);
+  assert.match(f.calls.sent.at(-1).message, /غير مسجل كمشرف/);
+});
+
+test('duplicate self message event is ignored, while a new message ID is accepted', async () => {
+  const f = fixture();
+  const first = f.event('إيقاف', botID, 'same-dm', false, 'same-message');
+  assert.equal(await f.handler.handle(f.api, first), true);
+  assert.equal(f.calls.stops, 1);
+  const sentAfterFirst = f.calls.sent.length;
+  assert.equal(await f.handler.handle(f.api, first), true);
+  assert.equal(f.calls.stops, 1);
+  assert.equal(f.calls.sent.length, sentAfterFirst);
+
+  assert.equal(await f.handler.handle(f.api, f.event('إيقاف', botID, 'same-dm', false, 'new-message')), true);
+  assert.equal(f.calls.stops, 1);
+  assert.match(f.calls.sent.at(-1).message, /بالفعل/);
 });
 
 test('stop persists a paused mode while preserving the private command listener, then start resumes', async () => {
@@ -137,7 +162,7 @@ test('stop failure rolls back the persisted pause and does not claim success', a
 
 test('restart acknowledges in the same DM and does not erase a saved paused state', async () => {
   const f = fixture({ paused: true });
-  await f.handler.handle(f.api, f.event('إعادة تشغيل', owner, 'restart-dm'));
+  await f.handler.handle(f.api, f.event('إعادة تشغيل', botID, 'restart-dm'));
   assert.equal(f.calls.restarts, 1);
   assert.equal(f.controlStore.isPaused(), true);
   assert.equal(f.calls.sent[0].threadID, 'restart-dm');
@@ -154,19 +179,19 @@ test('admin add/remove updates only the persistent admin store and protects self
   assert.equal(f.members.has(member), false);
   assert.match(f.calls.sent.at(-1).message, /تم سحب صلاحية المشرف/);
 
-  await f.handler.handle(f.api, f.event(`حذف مشرف ${owner}`));
-  assert.equal(f.members.has(owner), true);
+  await f.handler.handle(f.api, f.event(`حذف مشرف ${botID}`));
+  assert.equal(f.members.has(botID), true);
   assert.match(f.calls.sent.at(-1).message, /الحساب الذي أرسل الأمر/);
 
-  const only = fixture({ admins: [owner] });
-  await only.handler.handle(only.api, only.event('حذف مشرف 100000000001'));
-  assert.equal(only.members.has(owner), true);
+  const only = fixture({ admins: [botID] });
+  await only.handler.handle(only.api, only.event(`حذف مشرف ${botID}`));
+  assert.equal(only.members.has(botID), true);
   assert.match(only.calls.sent.at(-1).message, /الحساب الذي أرسل الأمر/);
 
-  const lastAdmin = fixture({ admins: [owner] });
+  const lastAdmin = fixture({ admins: [botID] });
   lastAdmin.adminStore.remove = () => ({ ok: false, reason: 'last' });
   await lastAdmin.handler.handle(lastAdmin.api, lastAdmin.event(`حذف مشرف ${member}`));
-  assert.equal(lastAdmin.members.has(owner), true);
+  assert.equal(lastAdmin.members.has(botID), true);
   assert.match(lastAdmin.calls.sent.at(-1).message, /آخر مشرف/);
 });
 
