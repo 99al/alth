@@ -4,6 +4,7 @@ const adminStore = require('./admin-store.cjs');
 const nmCommand = require('./nm-command.standalone');
 const { createAdminIdHandler, commandEntries } = require('./admin-id-commands.cjs');
 const { getBotCommandProfile } = require('./bot-command-profile.cjs');
+const privateChatDiagnostics = require('./private-chat-diagnostics.cjs');
 const serviceCommandProfile = getBotCommandProfile();
 const adminIdHandler = createAdminIdHandler({ store: adminStore });
 
@@ -144,6 +145,7 @@ async function handleMessage(api, event, dependencies = {}) {
   const commandEnabled = dependencies.isCommandEnabled || isCommandEnabled;
   const commandProfile = dependencies.commandProfile || serviceCommandProfile;
   const adminCommands = dependencies.adminIdHandler || adminIdHandler;
+  const chatDiagnostics = dependencies.privateChatDiagnostics || privateChatDiagnostics.diagnostics;
 
   const body = String(event.body || '').trim();
 
@@ -192,12 +194,24 @@ async function handleMessage(api, event, dependencies = {}) {
 
   // ─── قائمة الأوامر ───
   if (/^(?:اومر|أوامر)(?:\s|$)/u.test(body)) {
-    if (!canAdmin(senderID)) return;
-    if (!commandEnabled('اومر')) return;
+    const diagnosticContext = {
+      chat: privateChatDiagnostics.chatKind(event.isGroup),
+      type: privateChatDiagnostics.eventKind(event.type),
+    };
+    chatDiagnostics.emit('command_matched', diagnosticContext);
+    const adminAllowed = canAdmin(senderID);
+    chatDiagnostics.emit(adminAllowed ? 'admin_allowed' : 'admin_denied', diagnosticContext);
+    if (!adminAllowed) return;
+    if (!commandEnabled('اومر')) {
+      chatDiagnostics.emit('command_disabled', diagnosticContext);
+      return;
+    }
     const cmd = commands.get('اومر');
     if (cmd && typeof cmd.execute === 'function') {
-      Promise.resolve(cmd.execute(api, event))
+      Promise.resolve(cmd.execute(api, event, chatDiagnostics))
         .catch(() => console.error('[الث] تعذر عرض قائمة الأوامر.'));
+    } else {
+      chatDiagnostics.emit('handler_missing', diagnosticContext);
     }
     return;
   }

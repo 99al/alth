@@ -4,6 +4,7 @@ const security = require('./security.cjs');
 const { loginPromiseApi } = require('./fca-login.cjs');
 const { installDelayedSendMessage } = require('./delayed-send-message.cjs');
 const { createMqttSendRecovery, stopMqttListener } = require('./mqtt-recovery.cjs');
+const privateChatDiagnostics = require('./private-chat-diagnostics.cjs');
 
 function prepareFcaRuntimeConfig() {
   const configPath = path.join(process.cwd(), 'fca-config.json');
@@ -837,6 +838,7 @@ async function startListening(api) {
 
         const type =
           event.type || 'unknown';
+        privateChatDiagnostics.recordMessageEvent(event);
 
         if (
           type !== 'typ' &&
