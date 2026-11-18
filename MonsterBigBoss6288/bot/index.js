@@ -65,14 +65,20 @@ const {
   pausePersistentCommands,
   resumePersistentCommands,
   startNmCommand,
-  stopNmCommand
+  stopNmCommand,
+  configurePrivateAdminControl,
+  setBotAccountID,
+  registerBotIdentityAsAdmin,
+  isBotControlPaused
 } = require('./main');
 
 function stopNmTimers() {
   try {
-    if (typeof stopNmCommand === 'function') stopNmCommand();
+    if (typeof stopNmCommand !== 'function') return false;
+    return stopNmCommand() !== false;
   } catch {
     console.error('[الث] تعذر إيقاف مؤقتات قفل الاسم.');
+    return false;
   }
 }
 
@@ -261,6 +267,42 @@ let appstateSaverInterval = null;
 let memorySweeperInterval = null;
 let listenerErrorCount = 0;
 let lastReconnectRequest = 0;
+
+const privateAdminControlHandler = typeof configurePrivateAdminControl === 'function' ? configurePrivateAdminControl({
+  getStatus: () => ({
+    connected: Boolean(botApi && !isRestarting),
+    listening: Boolean(msgEmitter && !isRestarting),
+    uptimeSeconds: process.uptime()
+  }),
+  onStop: () => {
+    try {
+      pausePersistentCommands(undefined, { throwOnError: true });
+      if (!stopNmTimers()) throw new Error('STOP_NM_FAILED');
+      return true;
+    } catch {
+      try {
+        if (botApi && !isRestarting) {
+          startNmCommand(botApi);
+          resumePersistentCommands(botApi);
+        }
+      } catch {}
+      return false;
+    }
+  },
+  onStart: () => {
+    if (!botApi || isRestarting) return false;
+    try {
+      startNmCommand(botApi);
+      resumePersistentCommands(botApi, undefined, { throwOnError: true });
+      return true;
+    } catch {
+      try { pausePersistentCommands(); } catch {}
+      stopNmTimers();
+      return false;
+    }
+  },
+  onRestart: () => scheduleRestart(1500)
+}) : null;
 
 const mqttSendRecovery = createMqttSendRecovery({
   threshold: 3,
@@ -619,7 +661,7 @@ function startBot() {
 
   const loginOptions = {
     listenEvents: true,
-    selfListen: false,
+    selfListen: true,
     autoMarkRead: false,
     forceLogin: false,
     autoReconnect: true,
@@ -710,6 +752,14 @@ function startBot() {
         }
       } catch (e) {}
 
+      if (typeof setBotAccountID === 'function') setBotAccountID(botUserID);
+      if (typeof registerBotIdentityAsAdmin === 'function') {
+        const selfAdminResult = registerBotIdentityAsAdmin(botUserID);
+        if (!selfAdminResult.ok) {
+          console.error('[الث] تعذر حفظ صلاحية حساب البوت الذاتية؛ تبقى صلاحيات المشرفين المحفوظة دون تغيير.');
+        }
+      }
+
       writeBotState(true, {
         status: 'متصل ويعمل'
       });
@@ -735,16 +785,20 @@ function startBot() {
 
       loadCommands();
 
-      try {
-        if (typeof startNmCommand === 'function') startNmCommand(api);
-      } catch {
-        console.error('[الث] تعذر استئناف قفل اسم المجموعة.');
-      }
+      if (typeof isBotControlPaused === 'function' && isBotControlPaused()) {
+        console.log('[الث] البوت متوقف مؤقتًا؛ مستمع الخاص جاهز لأوامر الإدارة فقط.');
+      } else {
+        try {
+          if (typeof startNmCommand === 'function') startNmCommand(api);
+        } catch {
+          console.error('[الث] تعذر استئناف قفل الاسم.');
+        }
 
-      try {
-        resumePersistentCommands(api);
-      } catch {
-        console.error('[الث] تعذر استئناف بعض المهام الدورية المحفوظة.');
+        try {
+          resumePersistentCommands(api);
+        } catch {
+          console.error('[الث] تعذر استئناف بعض المهام الدورية.');
+        }
       }
 
       startListening(api);
@@ -855,12 +909,18 @@ async function startListening(api) {
         ) {
           handleMessage(
             api,
-            event
+            event,
+            {
+              privateAdminControl: privateAdminControlHandler,
+              botAccountID: botUserID,
+              isBotPaused: isBotControlPaused
+            }
           );
         } else {
           handleEvent(
             api,
-            event
+            event,
+            { isBotPaused: isBotControlPaused }
           );
         }
 

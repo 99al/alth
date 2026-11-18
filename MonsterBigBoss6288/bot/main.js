@@ -5,8 +5,39 @@ const nmCommand = require('./nm-command.standalone');
 const { createAdminIdHandler, commandEntries } = require('./admin-id-commands.cjs');
 const { getBotCommandProfile } = require('./bot-command-profile.cjs');
 const privateChatDiagnostics = require('./private-chat-diagnostics.cjs');
+const botControlState = require('./bot-control-state.cjs').defaultStore;
+const { createPrivateAdminControl, registerBotAccountAsAdmin } = require('./private-admin-control.cjs');
 const serviceCommandProfile = getBotCommandProfile();
 const adminIdHandler = createAdminIdHandler({ store: adminStore });
+let botAccountID = null;
+let privateAdminControlHandler = createPrivateAdminControl({
+  adminStore,
+  controlStore: botControlState,
+  getBotAccountID: () => botAccountID
+});
+
+function configurePrivateAdminControl(actions = {}) {
+  privateAdminControlHandler = createPrivateAdminControl({
+    adminStore,
+    controlStore: botControlState,
+    actions,
+    getBotAccountID: () => botAccountID
+  });
+  return privateAdminControlHandler;
+}
+
+function setBotAccountID(id) {
+  botAccountID = /^[1-9]\d*$/.test(String(id || '')) ? String(id) : null;
+  return botAccountID;
+}
+
+function registerBotIdentityAsAdmin(id) {
+  return registerBotAccountAsAdmin(adminStore, id);
+}
+
+function isBotControlPaused() {
+  return botControlState.isPaused();
+}
 
 // ─── قراءة المشرفين من ملف admins-config.json ───
 function loadAdmins(configPath = path.join(__dirname, 'admins-config.json')) {
@@ -156,6 +187,25 @@ async function handleMessage(api, event, dependencies = {}) {
   const senderID = String(
     event.senderID || ''
   );
+
+  const controlHandler = dependencies.privateAdminControl;
+  if (controlHandler && typeof controlHandler.handle === 'function') {
+    try {
+      if (await controlHandler.handle(api, event)) return;
+    } catch {
+      console.error('[الث] تعذر معالجة أمر إدارة خاص.');
+    }
+  }
+
+  // The logged-in Messenger account can issue private control commands to itself.
+  // Ignore every other self-authored event so enabling selfListen cannot form a reply loop.
+  const currentBotID = String(dependencies.botAccountID || '');
+  if (currentBotID && senderID === currentBotID) return;
+
+  const paused = typeof dependencies.isBotPaused === 'function'
+    ? dependencies.isBotPaused() === true
+    : false;
+  if (paused) return;
 
   // إدارة المشرفين بالأيدي قبل متابعة جريد، العداد، الردود والتفاعلات.
   if (adminCommands && typeof adminCommands.handle === 'function' &&
@@ -552,8 +602,9 @@ function cancelActiveNameLoops(threadID, commandMap = commandRegistry, options =
   return options.details ? { cancelled, persistenceFailures } : cancelled;
 }
 
-function pausePersistentCommands(commandMap = commandRegistry) {
+function pausePersistentCommands(commandMap = commandRegistry, options = {}) {
   let paused = 0;
+  let failures = 0;
   for (const name of ['ويس', serviceCommandProfile.jareed.commandName, 'هويه', 'قروب', 'كاتش']) {
     const command = commandMap.get(name);
     if (!command || typeof command.pauseAll !== 'function') continue;
@@ -562,24 +613,29 @@ function pausePersistentCommands(commandMap = commandRegistry) {
       if (typeof result === 'number') paused += result;
       else if (result) paused++;
     } catch {
+      failures++;
       console.error('[الث] تعذر تعليق إحدى المهام المحفوظة مؤقتًا.');
     }
   }
+  if (options.throwOnError && failures > 0) throw new Error('PAUSE_TASKS_FAILED');
   return paused;
 }
 
-function resumePersistentCommands(api, commandMap = commandRegistry) {
+function resumePersistentCommands(api, commandMap = commandRegistry, options = {}) {
   let resumed = 0;
+  let failures = 0;
   for (const name of ['ويس', serviceCommandProfile.jareed.commandName, 'هويه', 'قروب', 'كاتش']) {
     const command = commandMap.get(name);
     if (!command || typeof command.resumeAll !== 'function') continue;
     try {
-      const result = command.resumeAll(api);
+      const result = command.resumeAll(api, { strict: options.throwOnError === true });
       if (typeof result === 'number') resumed += result;
     } catch {
+      failures++;
       console.error('[الث] تعذر استئناف إحدى المهام المحفوظة.');
     }
   }
+  if (options.throwOnError && failures > 0) throw new Error('RESUME_TASKS_FAILED');
   return resumed;
 }
 
@@ -592,7 +648,8 @@ function stopNmCommand() {
 }
 
 // ─── معالجة الأحداث العامة ───
-function handleEvent(api, event) {
+function handleEvent(api, event, dependencies = {}) {
+  if (typeof dependencies.isBotPaused === 'function' && dependencies.isBotPaused() === true) return;
   const command = commandRegistry.get('كاتش');
   if (!command || !event) return;
   try {
@@ -614,6 +671,10 @@ module.exports = {
   commands: commandRegistry,
   handleMessage,
   handleEvent,
+  configurePrivateAdminControl,
+  setBotAccountID,
+  registerBotIdentityAsAdmin,
+  isBotControlPaused,
   cancelActiveNameLoops,
   pausePersistentCommands,
   resumePersistentCommands,

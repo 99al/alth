@@ -140,8 +140,9 @@ async function runEvent(harness, { isGroup, type = 'message', body = 'أوامر
   assert.equal(unaffected.sends.length, 1, 'logging failures do not prevent reply or message dispatch');
 
   assert.match(sourceIndex, /privateChatDiagnostics\.recordMessageEvent\(event\)/, 'live listener records only through safe event wrapper');
-  assert.match(sourceIndex, /type === 'message'[\s\S]{0,80}type === 'message_reply'[\s\S]{0,150}handleMessage\(\s*api,\s*event\s*\)/, 'existing message dispatch is retained');
-  assert.match(sourceIndex, /selfListen:\s*false/, 'self-listening setting is unchanged');
+  assert.match(sourceIndex, /type === 'message'[\s\S]{0,80}type === 'message_reply'[\s\S]{0,220}handleMessage\(\s*api,\s*event,\s*\{/, 'existing message dispatch is retained with explicit control dependencies');
+  assert.match(sourceIndex, /selfListen:\s*true/, 'the logged-in bot account can receive its own private commands');
+  assert.match(sourceMain, /currentBotID && senderID === currentBotID\) return/, 'unrecognized self-authored events are ignored to prevent loops');
   assert.match(sourceMain, /if \(!adminAllowed\) return/, 'admin check remains enforced');
 
   console.log('PASS: DM/group routing, admin access, reply outcome, safe error category, redaction, caps, expiry, and unchanged dispatch');
