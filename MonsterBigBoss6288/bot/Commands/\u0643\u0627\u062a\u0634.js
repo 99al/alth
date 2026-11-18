@@ -301,10 +301,11 @@ module.exports = {
     }, 300);
   },
 
-  resumeAll(api) {
+  resumeAll(api, options = {}) {
     let saved;
     try { saved = commandState.getAll('كاتش'); } catch {
       console.error('[كاتش] تعذر قراءة الحمايات المحفوظة لاستعادتها.');
+      if (options.strict) throw new Error('KATCH_RESUME_STATE_FAILED');
       return 0;
     }
     let resumed = 0;

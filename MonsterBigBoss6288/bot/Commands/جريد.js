@@ -506,12 +506,13 @@ module.exports = {
     if (activeSchedules.has(key)) return true;
     try { return isValidSavedSchedule(commandState.get(stateCommandName, key)); } catch { return false; }
   },
-  resumeAll(api) {
+  resumeAll(api, options = {}) {
     let saved;
     try {
       saved = commandState.getAll(stateCommandName);
     } catch {
       console.error(`[${commandName}] تعذر قراءة الجداول المحفوظة لاستئنافها.`);
+      if (options.strict) throw new Error('JAREED_RESUME_STATE_FAILED');
       return 0;
     }
     let resumed = 0;
